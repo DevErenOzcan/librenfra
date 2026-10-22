@@ -1,0 +1,274 @@
+---
+# A Samba Active Directory domain controller on Ubuntu Server: the packages,
+# the domain (provisioned once), smb.conf and Kerberos, the DC's own name
+# resolution, and signed time for the domain's members.
+#
+# The domain's state - samba_ad_state_dir: the directory database, SYSVOL,
+# the keys - lives on the persistent data disk, bound there by data_volume
+# earlier in the play. A rebuilt VM finds it and is the same DC of the same
+# domain; the domain is only provisioned when there is no database at all.
+
+- name: samba_ad_dc | The VM's hostname is the one this DC is configured for
+  ansible.builtin.assert:
+    that: ansible_facts['hostname'] == samba_ad_hostname
+    quiet: true
+    fail_msg: >-
+      The VM is called {{ ansible_facts['hostname'] }}, but samba_ad_hostname
+      is {{ samba_ad_hostname }}. The VM's name in terraform/main.tf and
+      samba_ad_hostname in host_vars/dc1.yml must match.
+
+# --- the DC's own name ------------------------------------------------------
+# Samba needs its FQDN on its LAN address, never on 127.0.1.1. Proxmox's
+# cloud-init user-data sets manage_etc_hosts, so cloud-init rewrites
+# /etc/hosts at every boot from this template: the template is what keeps it.
+- name: samba_ad_dc | /etc/hosts as cloud-init renders it at boot
+  ansible.builtin.copy:
+    dest: /etc/cloud/templates/hosts.debian.tmpl
+    content: |
+      ## template:jinja
+      {{ samba_ad_hosts }}
+    owner: root
+    group: root
+    mode: "0644"
+  vars:
+    samba_ad_hosts: &samba_ad_hosts |-
+      # Managed by Ansible (librenfra samba_ad, role samba_ad_dc).
+      # Samba needs its FQDN on the LAN address, not on 127.0.1.1.
+      127.0.0.1 localhost
+      {{ samba_ad_address }} {{ samba_ad_fqdn }} {{ samba_ad_hostname }}
+
+      ::1 localhost ip6-localhost ip6-loopback
+      ff02::1 ip6-allnodes
+      ff02::2 ip6-allrouters
+
+- name: samba_ad_dc | /etc/hosts
+  ansible.builtin.copy:
+    dest: /etc/hosts
+    content: "{{ samba_ad_hosts }}\n"
+    owner: root
+    group: root
+    mode: "0644"
+  vars:
+    samba_ad_hosts: *samba_ad_hosts
+
+# --- packages ---------------------------------------------------------------
+# While the DC is not up yet, the VM resolves through the gateway (cloud-init);
+# once it runs, through itself (below).
+- name: samba_ad_dc | Packages
+  ansible.builtin.apt:
+    name: "{{ samba_ad_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: samba_ad_dc | Is Samba installed
+  ansible.builtin.stat:
+    path: /usr/sbin/samba
+  register: samba_ad_bin
+
+- name: samba_ad_dc | Dry-run note
+  ansible.builtin.debug:
+    msg: >-
+      Samba is not installed yet and a dry run installs nothing, so the domain
+      and everything after it are not checked. A real run provisions it.
+  when:
+    - ansible_check_mode
+    - not samba_ad_bin.stat.exists
+
+- name: samba_ad_dc | The domain and its services
+  when: not (ansible_check_mode and not samba_ad_bin.stat.exists)
+  block:
+    - name: samba_ad_dc | Is there a domain on the data disk
+      ansible.builtin.stat:
+        path: "{{ samba_ad_state_dir }}/private/sam.ldb"
+      register: samba_ad_db
+
+    # The samba package starts the stand-alone file server with its default
+    # smb.conf - on a rebuilt VM too, where it would hold port 445 when the DC
+    # starts. Once smb.conf names a DC, Ubuntu's units for these skip
+    # themselves (ExecCondition is-configured), so on a running DC this
+    # changes nothing.
+    - name: samba_ad_dc | Which services are present
+      ansible.builtin.service_facts:
+
+    - name: samba_ad_dc | The stand-alone file-server daemons are stopped
+      ansible.builtin.systemd_service:
+        name: "{{ item }}"
+        state: stopped
+      loop: [smbd, nmbd, winbind]
+      when: (item ~ '.service') in ansible_facts.services
+
+    # --- provisioning: once, when the data disk holds no domain ------------
+    - name: samba_ad_dc | Provision the domain (first run only)
+      when: not samba_ad_db.stat.exists
+      block:
+        - name: samba_ad_dc | The Administrator password is set and strong enough
+          ansible.builtin.assert:
+            that:
+              - samba_ad_admin_password | length >= 8
+              - samba_ad_admin_password is search('[A-Z]')
+              - samba_ad_admin_password is search('[a-z]')
+              - samba_ad_admin_password is search('[0-9]')
+            quiet: true
+            fail_msg: >-
+              There is no domain yet, and provisioning one needs
+              SAMBA_ADMIN_PASSWORD in {{ samba_ad_secrets_file }}: at least 8
+              characters with upper case, lower case and a digit (README.md,
+              "The Administrator password"). Nothing about the domain has
+              been changed.
+
+        # provision refuses an smb.conf that is not for a DC.
+        - name: samba_ad_dc | Remove the package's file-server smb.conf
+          ansible.builtin.file:
+            path: /etc/samba/smb.conf
+            state: absent
+
+        - name: samba_ad_dc | Provision the domain
+          ansible.builtin.command:
+            argv:
+              - samba-tool
+              - domain
+              - provision
+              - --server-role=dc
+              - --use-rfc2307
+              - --dns-backend=SAMBA_INTERNAL
+              - "--realm={{ samba_ad_realm }}"
+              - "--domain={{ samba_ad_workgroup }}"
+              - "--host-name={{ samba_ad_hostname }}"
+              - "--host-ip={{ samba_ad_address }}"
+              - "--function-level={{ samba_ad_function_level }}"
+              - "--option=dns forwarder = {{ samba_ad_dns_forwarder }}"
+              - "--adminpass={{ samba_ad_admin_password }}"
+            creates: "{{ samba_ad_state_dir }}/private/sam.ldb"
+          no_log: true
+
+    # --- configuration, on every run ----------------------------------------
+    - name: samba_ad_dc | smb.conf
+      ansible.builtin.template:
+        src: smb.conf.j2
+        dest: /etc/samba/smb.conf
+        owner: root
+        group: root
+        mode: "0644"
+        validate: testparm --suppress-prompt %s
+      notify: samba_ad_dc | Restart samba-ad-dc
+
+    # provision writes the realm's krb5.conf next to the database; it is on
+    # the data disk, so a rebuilt VM copies the same one.
+    - name: samba_ad_dc | krb5.conf from the domain
+      ansible.builtin.copy:
+        src: "{{ samba_ad_state_dir }}/private/krb5.conf"
+        dest: /etc/krb5.conf
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0644"
+      when: not ansible_check_mode or samba_ad_db.stat.exists
+
+    - name: samba_ad_dc | Drop-in directory for samba-ad-dc
+      ansible.builtin.file:
+        path: /etc/systemd/system/samba-ad-dc.service.d
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: samba_ad_dc | samba-ad-dc waits for the data disk
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/samba-ad-dc.service.d/data-volume.conf
+        content: |
+          # Managed by Ansible (role samba_ad_dc): the domain lives on the data volume.
+          [Unit]
+          RequiresMountsFor={{ samba_ad_state_dir }}
+        owner: root
+        group: root
+        mode: "0644"
+      notify: samba_ad_dc | Restart samba-ad-dc
+
+    # --- the DC resolves through itself ---------------------------------------
+    # Samba's DNS listens on port 53, where systemd-resolved's stub would be,
+    # and a DC has to find its own SRV records. Everything not in the domain
+    # goes on to samba_ad_dns_forwarder.
+    - name: samba_ad_dc | systemd-resolved is off
+      ansible.builtin.systemd_service:
+        name: systemd-resolved
+        state: stopped
+        enabled: false
+        masked: true
+
+    - name: samba_ad_dc | Is /etc/resolv.conf resolved's link
+      ansible.builtin.stat:
+        path: /etc/resolv.conf
+      register: samba_ad_resolv
+
+    - name: samba_ad_dc | Replace the link with a file
+      ansible.builtin.file:
+        path: /etc/resolv.conf
+        state: absent
+      when: samba_ad_resolv.stat.islnk | default(false)
+
+    - name: samba_ad_dc | /etc/resolv.conf
+      ansible.builtin.copy:
+        dest: /etc/resolv.conf
+        content: |
+          # Managed by Ansible (role samba_ad_dc): a DC resolves through its own DNS.
+          search {{ samba_ad_dns_domain }}
+          nameserver {{ samba_ad_address }}
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: samba_ad_dc | samba-ad-dc runs and starts at boot
+      ansible.builtin.systemd_service:
+        name: samba-ad-dc
+        state: started
+        enabled: true
+        masked: false
+        daemon_reload: true
+
+    # --- time -----------------------------------------------------------------
+    # Windows members take their time from the DC and want it signed; chrony
+    # signs through Samba's socket (its AppArmor profile allows exactly that
+    # path) and needs the group on the socket's directory.
+    - name: samba_ad_dc | chrony serves the domain's time
+      ansible.builtin.copy:
+        dest: /etc/chrony/conf.d/samba-ad-dc.conf
+        content: |
+          # Managed by Ansible (librenfra samba_ad, role samba_ad_dc).
+          {% for net in samba_ad_ntp_allow %}
+          allow {{ net }}
+          {% endfor %}
+          ntpsigndsocket {{ samba_ad_state_dir }}/ntp_signd
+        owner: root
+        group: root
+        mode: "0644"
+      notify: samba_ad_dc | Restart chrony
+
+    - name: samba_ad_dc | chrony may use Samba's signing socket
+      ansible.builtin.file:
+        path: "{{ samba_ad_state_dir }}/ntp_signd"
+        state: directory
+        owner: root
+        group: _chrony
+        mode: "0750"
+      when: not ansible_check_mode or samba_ad_db.stat.exists
+      notify: samba_ad_dc | Restart chrony
+
+- name: samba_ad_dc | Apply changed settings before checking
+  ansible.builtin.meta: flush_handlers
+
+# --- check ----------------------------------------------------------------
+# Read-only: the DC answers for its own domain. Samba needs a few seconds
+# after a (re)start before DNS answers.
+- name: samba_ad_dc | The domain's LDAP SRV record points at this DC
+  ansible.builtin.command: >-
+    host -t SRV _ldap._tcp.{{ samba_ad_dns_domain }} {{ samba_ad_address }}
+  register: samba_ad_srv
+  changed_when: false
+  check_mode: false
+  retries: 10
+  delay: 3
+  until: samba_ad_srv.rc == 0 and (samba_ad_fqdn ~ '.') in samba_ad_srv.stdout
+  when:
+    - samba_ad_bin.stat.exists
+    - not ansible_check_mode or samba_ad_db.stat.exists

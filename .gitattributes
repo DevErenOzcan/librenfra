@@ -1,0 +1,5 @@
+# Everything here runs on Linux. Keep the working tree LF even in a Windows
+# checkout with core.autocrlf=true.
+* text=auto eol=lf
+*.png binary
+*.jpg binary

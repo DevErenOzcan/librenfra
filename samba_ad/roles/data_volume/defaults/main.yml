@@ -1,0 +1,15 @@
+---
+# The persistent data disk Terraform attaches as scsi1 (terraform/main.tf).
+# The values for this machine live in host_vars/dc1.yml.
+data_volume_device: /dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi1
+# The filesystem label the volume is found by. One per machine, at most 16
+# characters (ext4); a disk carrying any other label is never touched.
+data_volume_label: data
+data_volume_fstype: ext4
+data_volume_mountpoint: /mnt/data
+# Directories that live on the volume, bind-mounted over their usual place:
+#   - name: home                          directory on the volume
+#     path: /home                         where it appears
+#     stop: [display-manager.service]     units stopped while it is bound
+#     start: [display-manager.service]    units started afterwards (default: stop)
+data_volume_binds: []

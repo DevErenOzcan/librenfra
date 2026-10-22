@@ -1,0 +1,21 @@
+# {{ ansible_managed }}
+#
+# What `samba-tool domain provision` wrote when the domain was created, kept
+# by Ansible so a rebuilt VM gets it back without provisioning again:
+# librenfra, samba_ad/roles/samba_ad_dc. Change values in
+# samba_ad/host_vars/dc1.yml.
+[global]
+	netbios name = {{ samba_ad_netbios_name }}
+	workgroup = {{ samba_ad_workgroup }}
+	realm = {{ samba_ad_realm }}
+	server role = active directory domain controller
+	idmap_ldb:use rfc2307 = yes
+	dns forwarder = {{ samba_ad_dns_forwarder }}
+
+[sysvol]
+	path = {{ samba_ad_state_dir }}/sysvol
+	read only = no
+
+[netlogon]
+	path = {{ samba_ad_state_dir }}/sysvol/{{ samba_ad_dns_domain }}/scripts
+	read only = no

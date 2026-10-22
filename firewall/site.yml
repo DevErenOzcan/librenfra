@@ -1,0 +1,16 @@
+---
+# The firewall's configuration, over its REST API. From this directory, with
+# the venv active and the API key in .env (README.md, "The API key"):
+#
+#   ansible-playbook site.yml --check --diff     what would change
+#   ansible-playbook site.yml                    apply it
+#
+# Take a configuration backup before a real run: OPNsense cannot roll an API
+# change back (README.md, "Running it").
+#
+# Settings: host_vars/firewall.yml
+- name: OPNsense firewall
+  hosts: opnsense
+  gather_facts: false
+  roles:
+    - opnsense_config

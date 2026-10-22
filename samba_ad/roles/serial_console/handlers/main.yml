@@ -1,0 +1,6 @@
+---
+- name: serial_console | Restart the console
+  ansible.builtin.systemd_service:
+    name: "serial-getty@{{ serial_console_tty }}.service"
+    state: restarted
+    daemon_reload: true

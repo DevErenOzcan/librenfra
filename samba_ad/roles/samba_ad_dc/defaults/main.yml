@@ -1,0 +1,52 @@
+---
+# Values live in host_vars/dc1.yml; these are
+# the defaults and what follows from them.
+
+# --- the domain -------------------------------------------------------------
+# The DNS domain is the AD domain; the Kerberos realm is the same in capitals.
+# Neither can be renamed once the domain exists.
+samba_ad_dns_domain: example.internal
+samba_ad_realm: "{{ samba_ad_dns_domain | upper }}"
+# The NetBIOS domain name, at most 15 characters.
+samba_ad_workgroup: EXAMPLE
+
+# --- this DC ----------------------------------------------------------------
+# The hostname cloud-init gave the VM (its Terraform vm_name); the first label
+# of its FQDN and, in capitals, its NetBIOS name.
+samba_ad_hostname: dc1
+samba_ad_fqdn: "{{ samba_ad_hostname }}.{{ samba_ad_dns_domain }}"
+samba_ad_netbios_name: "{{ samba_ad_hostname | upper }}"
+# Its fixed LAN address: what its FQDN resolves to and what it serves on.
+samba_ad_address: ""
+
+# --- DNS and time -----------------------------------------------------------
+# Samba's own DNS answers for the domain and forwards everything else here.
+samba_ad_dns_forwarder: ""
+# Networks chrony serves (signed) time to. Kerberos fails beyond 5 minutes
+# of clock skew, so domain members take their time from the DC.
+samba_ad_ntp_allow: []
+
+# --- first run only ---------------------------------------------------------
+# The Administrator password the domain is provisioned with, from .env next
+# to site.yml (git-ignored; .env.example shows the format). Only needed while
+# there is no domain yet. Samba's default policy wants at least 7 characters
+# with upper case, lower case and a digit.
+samba_ad_secrets_file: "{{ playbook_dir }}/.env"
+samba_ad_admin_password: >-
+  {{ lookup('ansible.builtin.ini', 'SAMBA_ADMIN_PASSWORD', type='properties',
+            file=samba_ad_secrets_file, interpolation=false, default='')
+     if samba_ad_secrets_file is file else '' }}
+# 2008_R2 is samba-tool's default and what Samba supports fully.
+samba_ad_function_level: 2008_R2
+
+# --- packages and paths -----------------------------------------------------
+samba_ad_packages:
+  - samba-ad-dc
+  - samba-ad-provision
+  - krb5-user
+  - smbclient
+  - bind9-dnsutils
+  - chrony
+# Debian's state directory: the directory database (private/), SYSVOL, and
+# chrony's signing socket. The data volume is bound over it.
+samba_ad_state_dir: /var/lib/samba

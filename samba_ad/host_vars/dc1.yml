@@ -1,0 +1,39 @@
+---
+# =============================================================================
+# dc1 (VM 120) - the Samba AD domain controller, 10.10.10.10 on the LAN
+# =============================================================================
+# An Ubuntu Server 26.04 cloud image: cloud-init has set its address, its
+# hostname and the controller's SSH key for the "ubuntu" user, which has no
+# password and passwordless sudo (terraform/main.tf). Everything changed on
+# top of that is here; the roles' defaults/main.yml say what each value does.
+
+# --- The domain ----------------------------------------------------------------
+# A subdomain of the organisation's own registered domain, never .local, kept
+# out of public DNS: only the DC answers for it. Chosen once - a Samba domain
+# cannot be renamed. The Kerberos realm is the same in capitals; the workgroup
+# is the short NetBIOS name Windows shows.
+samba_ad_dns_domain: ad.deverenozcan.com
+samba_ad_workgroup: AD
+
+# --- This DC -------------------------------------------------------------------
+# The VM's name and cloud-init address in terraform/main.tf.
+samba_ad_hostname: dc1
+samba_ad_address: 10.10.10.10
+
+# --- DNS and time --------------------------------------------------------------
+# Unbound on the firewall's LAN address resolves everything outside the
+# domain (and forwards it on to the home router).
+samba_ad_dns_forwarder: 10.10.10.1
+# Domain members take their time from the DC (Kerberos fails beyond 5 minutes
+# of skew).
+samba_ad_ntp_allow:
+  - 10.10.10.0/24
+
+# --- Data volume ---------------------------------------------------------------
+# VM 9120's 10 GB disk (terraform/main.tf), mounted at /mnt/data.
+# /var/lib/samba lives on it: the directory database, SYSVOL and the domain's
+# keys. A DC rebuilt without it would be a new domain.
+data_volume_label: samba-data
+data_volume_binds:
+  - name: samba
+    path: /var/lib/samba

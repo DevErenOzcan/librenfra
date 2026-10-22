@@ -1,0 +1,15 @@
+# Terraform: state and secrets stay on the controller, never in git
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfplan
+
+# Ansible
+*.retry
+collections/
+
+# Secrets and the controller's Python environment
+.env
+.venv/
+.idea/

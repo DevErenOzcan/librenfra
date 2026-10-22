@@ -1,0 +1,25 @@
+---
+# Autologin on the serial console of a cloud-image guest, whose display in
+# Proxmox is serial0 (xterm.js, terraform/main.tf). Only someone already
+# logged in to Proxmox reaches this console, and they own the VM anyway; SSH
+# stays key-only. The agetty line is the unit's own plus --autologin.
+
+- name: serial_console | Drop-in directory
+  ansible.builtin.file:
+    path: "/etc/systemd/system/serial-getty@{{ serial_console_tty }}.service.d"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: "serial_console | The console logs in as {{ serial_console_user }}"
+  ansible.builtin.copy:
+    dest: "/etc/systemd/system/serial-getty@{{ serial_console_tty }}.service.d/autologin.conf"
+    content: |
+      [Service]
+      ExecStart=
+      ExecStart=-/usr/sbin/agetty --autologin {{ serial_console_user }} --noreset --noclear --issue-file=/etc/issue:/etc/issue.d:/run/issue.d:/usr/lib/issue.d --keep-baud 115200,57600,38400,9600 - ${TERM}
+    owner: root
+    group: root
+    mode: "0644"
+  notify: serial_console | Restart the console

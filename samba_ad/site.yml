@@ -1,0 +1,36 @@
+---
+# The domain controller's desired state. From this directory, with the venv
+# active; the Administrator password in .env is only needed for the run that
+# creates the domain:
+#
+#   ansible-playbook site.yml --check --diff     what would change
+#   ansible-playbook site.yml                    apply it
+#
+# One part at a time with --tags:
+#   console   autologin on the Proxmox serial console
+#   data      the persistent data disk, and /var/lib/samba on it
+#   samba     the domain, smb.conf, Kerberos, DNS and time
+#
+# Settings: host_vars/dc1.yml
+- name: Samba AD domain controller
+  hosts: samba_ad
+  become: true
+  pre_tasks:
+    # data_volume moves a directory onto the volume before binding it there,
+    # so it has to exist; the samba packages fill it in afterwards.
+    - name: /var/lib/samba exists for the data volume to take over
+      ansible.builtin.file:
+        path: /var/lib/samba
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      tags: [data]
+  roles:
+    - role: serial_console
+      tags: [console]
+    # Before Samba: the domain's state is on the volume.
+    - role: data_volume
+      tags: [data]
+    - role: samba_ad_dc
+      tags: [samba]

@@ -1,0 +1,256 @@
+---
+# =============================================================================
+# opnsense-fw (VM 100) - the firewall, OPNsense 26.7
+# =============================================================================
+# Everything the API writes, and what it can only report. Applied by
+# roles/opnsense_config; the defaults there say how. Taken from the running
+# firewall on 2026-10-22, with two deliberate changes: MGMT_WORKSTATION is now
+# the controller (the ubuntu-desktop VM, which left the LAN for the home
+# network), and the desktop's DHCP reservation on the LAN is gone.
+#
+# Descriptions of rules and DHCP reservations are how the modules find the
+# object on the firewall: change one and the next run creates a second object
+# beside the first. To rename, change it here and put the old text in the
+# matching opnsense_unused_* list below.
+
+# --- The network ---------------------------------------------------------------
+# Router on a stick: WAN is on the home network, the segments are port-less
+# bridges on the host (terraform/main.tf has the NIC order). All three
+# segments sit in 10.10.0.0/16, so one route reaches them from home:
+# 10.10.0.0/16 via 192.168.1.201.
+opnsense_home_lan: 192.168.1.0/24
+opnsense_internal_supernet: 10.10.0.0/16
+
+# OPNsense's interface identifiers, in the order the console assigned them.
+opnsense_if:
+  wan: wan
+  lan: lan
+  dmz: opt1
+  lab: opt2
+
+# The DMZ has no DHCP pool: its guests get their addresses from cloud-init.
+opnsense_segments:
+  lan: { cidr: 10.10.10.0/24, gateway: 10.10.10.1, dhcp_from: 10.10.10.100, dhcp_to: 10.10.10.245 }
+  dmz: { cidr: 10.10.20.0/24, gateway: 10.10.20.1, dhcp_from: "", dhcp_to: "" }
+  lab: { cidr: 10.10.30.0/24, gateway: 10.10.30.1, dhcp_from: 10.10.30.100, dhcp_to: 10.10.30.199 }
+
+# --- Aliases -------------------------------------------------------------------
+opnsense_aliases:
+  - name: HOME_LAN
+    type: network
+    content: ["{{ opnsense_home_lan }}"]
+    description: "The house network the Proxmox host also lives on"
+  - name: LAB_NETS
+    type: network
+    content: ["{{ opnsense_internal_supernet }}"]
+    description: "Every internal segment, summarised"
+  # The controller, VM 102 ubuntu-desktop, at its static address on the home
+  # network (2026-10-22; until then the Windows workstation, 192.168.1.24). If
+  # it ever moves, the rule naming this alias stops matching: closed, not open.
+  - name: MGMT_WORKSTATION
+    type: host
+    content: ["192.168.1.202"]
+    description: "The controller (the ubuntu-desktop VM) everything is managed from"
+
+# --- Filter rules --------------------------------------------------------------
+# The policy is asymmetric on purpose:
+#   * LAN is trusted: it reaches everything, and the home network reaches it.
+#   * DMZ and LAB reach the internet and nothing else; nothing there can open
+#     a connection into the LAN, the home network or the other segment.
+#   * From home only the LAN is reachable, plus SSH from the controller into
+#     the DMZ.
+# A stateful firewall needs only the initiating direction; replies ride the
+# state. Whatever no rule passes falls to OPNsense's default block.
+#
+# 'sequence' is the order within an interface. 'log' is on unless a rule says
+# otherwise (the module's default). These are all the filter rules the
+# firewall has; there are no rules from the GUI.
+opnsense_rules:
+  # ---- WAN, the home network ------------------------------------------------
+  # Sequence 10 keeps the web UI reachable from home. Do not remove it without
+  # another way in.
+  - description: "Home LAN may reach this firewall's web UI"
+    interface: "{{ opnsense_if.wan }}"
+    sequence: 10
+    action: pass
+    protocol: TCP
+    source_net: HOME_LAN
+    destination_net: "(self)"
+    destination_port: 443
+
+  - description: "Home network may reach the LAN segment"
+    interface: "{{ opnsense_if.wan }}"
+    sequence: 11
+    action: pass
+    source_net: HOME_LAN
+    destination_net: "{{ opnsense_segments.lan.cidr }}"
+
+  # SSH to the firewall itself, for administration without the console.
+  - description: "Home LAN may reach this firewall over SSH"
+    interface: "{{ opnsense_if.wan }}"
+    sequence: 12
+    action: pass
+    protocol: TCP
+    source_net: HOME_LAN
+    destination_net: "(self)"
+    destination_port: 22
+
+  # DMZ machines are managed over SSH from the controller, and from nothing
+  # else on the home network.
+  - description: "Workstation may reach the DMZ over SSH"
+    interface: "{{ opnsense_if.wan }}"
+    sequence: 13
+    action: pass
+    protocol: TCP
+    source_net: MGMT_WORKSTATION
+    destination_net: "{{ opnsense_segments.dmz.cidr }}"
+    destination_port: 22
+
+  # ---- LAN, trusted -----------------------------------------------------------
+  # One rule says all of it: the home network (leaving NATed as
+  # 192.168.1.201), this firewall, DMZ, LAB and the internet. Nothing comes
+  # back in unasked - DMZ and LAB block LAB_NETS at their sequence 30. IPv4
+  # only; nothing here uses IPv6. Not logged: it matches every LAN connection.
+  - description: "LAN may reach anything"
+    interface: "{{ opnsense_if.lan }}"
+    sequence: 50
+    action: pass
+    source_net: "{{ opnsense_segments.lan.cidr }}"
+    destination_net: any
+    log: false
+
+  # ---- DMZ, faces the internet: the segment most likely to be compromised ----
+  # DNS over TCP too, for answers that do not fit a UDP datagram.
+  - description: "DMZ may use the gateway for DNS"
+    interface: "{{ opnsense_if.dmz }}"
+    sequence: 10
+    action: pass
+    protocol: TCP/UDP
+    source_net: "{{ opnsense_segments.dmz.cidr }}"
+    destination_net: "{{ opnsense_segments.dmz.gateway }}"
+    destination_port: 53
+
+  - description: "DMZ must not reach the home network"
+    interface: "{{ opnsense_if.dmz }}"
+    sequence: 20
+    action: block
+    source_net: "{{ opnsense_segments.dmz.cidr }}"
+    destination_net: HOME_LAN
+
+  # LAB_NETS holds the gateways too, so this also drops ping to the gateway;
+  # only DNS (sequence 10) reaches it.
+  - description: "DMZ must not pivot into LAN or LAB"
+    interface: "{{ opnsense_if.dmz }}"
+    sequence: 30
+    action: block
+    source_net: "{{ opnsense_segments.dmz.cidr }}"
+    destination_net: LAB_NETS
+
+  - description: "DMZ may reach the internet (cloudflared dials out on 443)"
+    interface: "{{ opnsense_if.dmz }}"
+    sequence: 40
+    action: pass
+    source_net: "{{ opnsense_segments.dmz.cidr }}"
+    destination_net: any
+
+  # ---- LAB, experiments and quarantine ---------------------------------------
+  - description: "LAB may use the gateway for DNS"
+    interface: "{{ opnsense_if.lab }}"
+    sequence: 10
+    action: pass
+    protocol: TCP/UDP
+    source_net: "{{ opnsense_segments.lab.cidr }}"
+    destination_net: "{{ opnsense_segments.lab.gateway }}"
+    destination_port: 53
+
+  - description: "LAB must not reach the home network"
+    interface: "{{ opnsense_if.lab }}"
+    sequence: 20
+    action: block
+    source_net: "{{ opnsense_segments.lab.cidr }}"
+    destination_net: HOME_LAN
+
+  - description: "LAB is isolated from the other segments"
+    interface: "{{ opnsense_if.lab }}"
+    sequence: 30
+    action: block
+    source_net: "{{ opnsense_segments.lab.cidr }}"
+    destination_net: LAB_NETS
+
+  - description: "LAB may reach the internet"
+    interface: "{{ opnsense_if.lab }}"
+    sequence: 40
+    action: pass
+    source_net: "{{ opnsense_segments.lab.cidr }}"
+    destination_net: any
+
+# Rules to delete, by description. A renamed rule is written first and its old
+# self removed after it, so traffic never meets a gap. Empty when nothing is
+# pending.
+opnsense_unused_rules: []
+
+# --- DNS -------------------------------------------------------------------------
+# The segments are cut off from the home router, so Unbound on the firewall
+# (port 53) answers them and forwards everything to the router, which the
+# firewall itself may reach. The firewall's own resolver (System > Settings >
+# General) is 192.168.1.1 as well.
+opnsense_dns_forwarders:
+  - 192.168.1.1
+
+# --- DHCP ------------------------------------------------------------------------
+# Dnsmasq serves DHCP on the segments with a pool, LAN and LAB. Its DNS
+# listener is moved off 53, which is Unbound's.
+opnsense_dnsmasq_interfaces:
+  - "{{ opnsense_if.lan }}"
+  - "{{ opnsense_if.lab }}"
+opnsense_dnsmasq_port: 53053
+
+# Fixed addresses by MAC, for guests that cannot set their own. None at the
+# moment: every server here is a cloud image whose address cloud-init sets.
+#   - host: name           hostname, without the domain
+#     hardware_addr: MAC
+#     ip: 10.10.10.x       outside the pool
+#     description: "..."   the match key
+opnsense_dhcp_reservations: []
+
+# Reservations to delete, by description.
+opnsense_unused_dhcp_reservations:
+  # ubuntu-desktop (VM 102, BC:24:11:B8:0E:F8) had 10.10.10.11 on the LAN; it
+  # moved to the home network on 2026-10-22 and sets 192.168.1.202 itself.
+  - "GPU passthrough workstation - installer ISO, so no cloud-init to set an address"
+
+# --- Console/GUI baseline: checked, never written ------------------------------
+# What OPNsense's API reports but cannot write. It is set once at the console
+# and in the GUI (README.md, "Building it from nothing"); every run reads it
+# back and stops before writing anything if it differs.
+#
+# blockpriv must stay false: WAN IS the home network here, and "Block private
+# networks" drops it ahead of every WAN pass rule (it locked every home
+# client out of the firewall on 2026-09-17).
+opnsense_baseline_hostname: OPNsense.internal
+opnsense_baseline_interfaces:
+  - id: "{{ opnsense_if.wan }}"
+    device: vtnet0
+    address: "{{ ansible_host }}/24"
+    gateway: WAN_GW
+    blockbogons: true
+    blockpriv: false
+  - id: "{{ opnsense_if.lan }}"
+    device: vtnet1
+    address: "{{ opnsense_segments.lan.gateway }}/24"
+  - id: "{{ opnsense_if.dmz }}"
+    device: vtnet2
+    address: "{{ opnsense_segments.dmz.gateway }}/24"
+  - id: "{{ opnsense_if.lab }}"
+    device: vtnet3
+    address: "{{ opnsense_segments.lab.gateway }}/24"
+opnsense_baseline_gateways:
+  - name: WAN_GW
+    interface: "{{ opnsense_if.wan }}"
+    gateway: 192.168.1.1   # the home router
+    default: true
+# sshd is what WAN sequence 12 exists for.
+opnsense_baseline_services:
+  - openssh
+  - unbound
+  - dnsmasq

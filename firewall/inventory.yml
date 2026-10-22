@@ -1,0 +1,15 @@
+---
+# The firewall. Nothing connects to it over SSH: the ansibleguy.opnsense
+# modules run on the controller and call OPNsense's REST API at ansible_host.
+# So the connection is local, and the interpreter is whichever Python runs
+# ansible-playbook - the repo's .venv, the one with httpx. Discovery would pick
+# the system /usr/bin/python3, which has no httpx.
+# Its settings are in host_vars/firewall.yml.
+all:
+  children:
+    opnsense:
+      hosts:
+        firewall:
+          ansible_host: 192.168.1.201
+          ansible_connection: local
+          ansible_python_interpreter: "{{ ansible_playbook_python }}"

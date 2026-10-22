@@ -1,0 +1,10 @@
+---
+# Collections the roles here use. Install them into the controller once:
+#   ansible-galaxy collection install -r requirements.yml
+collections:
+  # ansible.posix.mount (data_volume)
+  - name: ansible.posix
+    version: ">=1.5.4"
+  # community.general.filesystem (data_volume)
+  - name: community.general
+    version: ">=8.0.0"

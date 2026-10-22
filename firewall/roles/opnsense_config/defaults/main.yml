@@ -1,0 +1,42 @@
+---
+# The firewall's settings live in host_vars/firewall.yml; these are the
+# defaults and how the role reaches the API.
+
+# --- the API -----------------------------------------------------------------
+opnsense_host: "{{ ansible_host }}"
+opnsense_port: 443
+# The firewall's own self-signed certificate; the API is reached over the
+# home network only.
+opnsense_ssl_verify: false
+
+# The API key, from .env next to site.yml (git-ignored; .env.example shows
+# the format). Read here, so nothing has to be exported before a run.
+opnsense_secrets_file: "{{ playbook_dir }}/.env"
+opnsense_api_key: >-
+  {{ lookup('ansible.builtin.ini', 'OPNSENSE_API_KEY', type='properties',
+            file=opnsense_secrets_file, interpolation=false, default='')
+     if opnsense_secrets_file is file else '' }}
+opnsense_api_secret: >-
+  {{ lookup('ansible.builtin.ini', 'OPNSENSE_API_SECRET', type='properties',
+            file=opnsense_secrets_file, interpolation=false, default='')
+     if opnsense_secrets_file is file else '' }}
+
+# --- what is written ---------------------------------------------------------
+# opnsense_if maps names to OPNsense's interface identifiers (wan, lan, optN).
+opnsense_if: {}
+# name -> { cidr, gateway, dhcp_from, dhcp_to }; an empty dhcp_from: no pool.
+opnsense_segments: {}
+opnsense_aliases: []
+opnsense_rules: []
+opnsense_unused_rules: []
+opnsense_dns_forwarders: []
+opnsense_dnsmasq_interfaces: []
+opnsense_dnsmasq_port: 53053
+opnsense_dhcp_reservations: []
+opnsense_unused_dhcp_reservations: []
+
+# --- what is only checked ----------------------------------------------------
+opnsense_baseline_hostname: ""
+opnsense_baseline_interfaces: []
+opnsense_baseline_gateways: []
+opnsense_baseline_services: []
