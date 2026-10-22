@@ -17,8 +17,7 @@ Windows machines join it as they would a Windows DC; Linux machines with
 | `.env` | the Administrator password, for the run that creates the domain (git-ignored; `.env.example` shows the format) |
 | `ansible.cfg`, `requirements.yml` | Ansible settings and the collections the roles need |
 
-**Status: written and checked, not built yet.** VM 120 and VM 9120 do not
-exist; [Building it from nothing](#building-it-from-nothing) creates them.
+Built on 2026-10-22: the domain was provisioned then, on Samba 4.23.
 
 ## How it is put together
 
@@ -154,7 +153,8 @@ It
    Samba's internal DNS, RFC 2307 attributes and `10.10.10.1` as forwarder;
 6. writes `smb.conf` (the settings provisioning wrote, kept by Ansible) and
    `/etc/krb5.conf`;
-7. points the DC's resolver at itself and starts `samba-ad-dc`;
+7. points the DC's resolver at itself, lets the boot's network wait do
+   without `systemd-resolved`, and starts `samba-ad-dc`;
 8. lets chrony serve signed time to `10.10.10.0/24`;
 9. checks that the domain's LDAP SRV record points at `dc1`.
 
@@ -218,6 +218,17 @@ a password.
 
 ## Good to know
 
+- **`cloud-init status` says "degraded done".** Proxmox's user-data still
+  uses the deprecated `user:` key; cloud-init warns and carries on. Nothing
+  is wrong.
+- **netplan waits for DNS through `systemd-resolved`.** Ubuntu 26.04's netplan
+  adds `--dns` to `systemd-networkd-wait-online`; with resolved off on a DC
+  that fails at every boot and the system reports "degraded". `samba_ad_dc`
+  adds a drop-in that waits for a routable link only;
+  `systemctl is-system-running` says `running`.
+- **The first run logs one failure of `samba-ad-dc`.** The new `smb.conf`
+  restarts it seconds after its first start, and Samba exits with status 127
+  when it is stopped; systemd starts it again straight away.
 - **The hostname is the VM's name.** cloud-init sets it from `name` in
   `terraform/main.tf`; `samba_ad_hostname` must be the same, and the role
   stops if they differ. At most 15 characters: it is also the NetBIOS name.

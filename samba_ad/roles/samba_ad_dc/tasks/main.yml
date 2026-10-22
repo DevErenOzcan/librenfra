@@ -218,6 +218,33 @@
         group: root
         mode: "0644"
 
+    # netplan 1.2 (Ubuntu 26.04) makes systemd-networkd-wait-online wait for
+    # DNS through systemd-resolved (--dns, in its generated 10-netplan.conf).
+    # With resolved off, that wait fails at every boot and the system reports
+    # "degraded". This drop-in comes after netplan's and waits for a routable
+    # link only.
+    - name: samba_ad_dc | Drop-in directory for systemd-networkd-wait-online
+      ansible.builtin.file:
+        path: /etc/systemd/system/systemd-networkd-wait-online.service.d
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: samba_ad_dc | The network counts as online without systemd-resolved
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/systemd-networkd-wait-online.service.d/50-no-resolved.conf
+        content: |
+          # Managed by Ansible (librenfra samba_ad, role samba_ad_dc).
+          # netplan's --dns needs systemd-resolved, which a DC does without.
+          [Service]
+          ExecStart=
+          ExecStart=/usr/lib/systemd/systemd-networkd-wait-online --any -o routable
+        owner: root
+        group: root
+        mode: "0644"
+      notify: samba_ad_dc | Wait for the network again
+
     - name: samba_ad_dc | samba-ad-dc runs and starts at boot
       ansible.builtin.systemd_service:
         name: samba-ad-dc
