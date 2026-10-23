@@ -1,0 +1,63 @@
+---
+# The receiver: a small HTTP service on 127.0.0.1 that takes each message the
+# Cloudflare Email Worker sends through the tunnel and hands it to Postfix
+# over SMTP, answering with what Postfix said (files/receiver.py has the
+# protocol). Python's standard library only.
+
+- name: mail_receiver | The shared secret is in .env
+  ansible.builtin.assert:
+    that: mail_receiver_secret | length >= 32
+    quiet: true
+    fail_msg: >-
+      No MAIL_RECEIVER_SECRET (at least 32 characters) in
+      {{ mail_secrets_file | default('.env') }}. Make one with
+      openssl rand -hex 32 (README.md, "Secrets"). Nothing has been changed.
+  no_log: true
+
+- name: mail_receiver | Directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - /usr/local/lib/mail-receiver
+    - /etc/mail-receiver
+
+- name: mail_receiver | The program
+  ansible.builtin.copy:
+    src: receiver.py
+    dest: /usr/local/lib/mail-receiver/receiver.py
+    owner: root
+    group: root
+    mode: "0755"
+  notify: mail_receiver | Restart the receiver
+
+# Read by systemd, which hands it to the service as a credential.
+- name: mail_receiver | The shared secret
+  ansible.builtin.copy:
+    dest: /etc/mail-receiver/secret
+    content: "{{ mail_receiver_secret }}\n"
+    owner: root
+    group: root
+    mode: "0600"
+  diff: false
+  no_log: true
+  notify: mail_receiver | Restart the receiver
+
+- name: mail_receiver | The service
+  ansible.builtin.template:
+    src: mail-receiver.service.j2
+    dest: /etc/systemd/system/mail-receiver.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: mail_receiver | Restart the receiver
+
+- name: mail_receiver | The receiver runs and starts at boot
+  ansible.builtin.systemd_service:
+    name: mail-receiver
+    state: started
+    enabled: true
+    daemon_reload: true

@@ -1,0 +1,112 @@
+# {{ ansible_managed }}
+#
+# Dovecot 2.4 for {{ mail_domain }}: IMAP for users, LMTP for Postfix to
+# deliver into, sign-in against Active Directory. The whole configuration is
+# this one file. librenfra, mail_server/roles/dovecot.
+dovecot_config_version = 2.4.2
+dovecot_storage_version = 2.4.2
+
+protocols = imap lmtp
+listen = *
+
+# --- the mailboxes ------------------------------------------------------------
+# One owner for all of them; a Maildir per user under
+# {{ mail_vmail_home }}/<domain>/<local part>.
+mail_uid = {{ mail_vmail_user }}
+mail_gid = {{ mail_vmail_user }}
+first_valid_uid = 1000
+mail_home = {{ mail_vmail_home }}/%{user | domain}/%{user | username}
+mail_driver = maildir
+mail_path = ~/Maildir
+
+namespace inbox {
+  inbox = yes
+  separator = /
+
+  mailbox Drafts {
+    special_use = \Drafts
+    auto = subscribe
+  }
+  mailbox Junk {
+    special_use = \Junk
+    auto = subscribe
+  }
+  mailbox Trash {
+    special_use = \Trash
+    auto = subscribe
+  }
+  mailbox Sent {
+    special_use = \Sent
+    auto = subscribe
+  }
+}
+
+# --- signing in: Active Directory ----------------------------------------------
+# Users sign in with their address and their AD password: Dovecot finds the
+# user as svc-mail, then binds as that user with the password given.
+auth_mechanisms = plain login
+auth_username_format = %{user | lower}
+
+ldap_uris = ldaps://{{ mail_ad_server }}
+ldap_auth_dn = {{ mail_ad_bind_user }}
+# ldap_auth_dn_password, in a file only root and Dovecot can read.
+!include /etc/dovecot/ldap-password.conf
+ldap_base = {{ mail_ad_base }}
+# The DC's certificate is checked against the CA in /etc/ldap/ldap.conf
+# (roles/mail_base): Dovecot's LDAP connection goes through libldap.
+
+passdb ldap {
+  bind = yes
+  filter = {{ dovecot_ldap_filter }}
+}
+
+# The same user, for delivery: LMTP refuses an address that is not a
+# mailbox. Its own connection, since the passdb's rebinds as each user.
+userdb ldap {
+  filter = {{ dovecot_ldap_filter }}
+  ldap_connection_group = userdb
+}
+
+# --- TLS ------------------------------------------------------------------------
+ssl = required
+ssl_server_cert_file = {{ mail_tls_cert_file }}
+ssl_server_key_file = {{ mail_tls_key_file }}
+
+# IMAP over TLS on 993 only; plain 143 stays closed.
+service imap-login {
+  inet_listener imap {
+    port = 0
+  }
+}
+
+# --- Postfix ----------------------------------------------------------------------
+# The two sockets Postfix talks to, inside its spool.
+service lmtp {
+  unix_listener /var/spool/postfix/private/dovecot-lmtp {
+    mode = 0600
+    user = postfix
+    group = postfix
+  }
+}
+
+service auth {
+  unix_listener /var/spool/postfix/private/auth {
+    mode = 0660
+    user = postfix
+    group = postfix
+  }
+}
+
+# --- spam into Junk ------------------------------------------------------------
+# rspamd marks spam with "X-Spam: Yes"; this sieve script, run before the
+# user's own, files it into Junk.
+protocol lmtp {
+  mail_plugins {
+    sieve = yes
+  }
+}
+
+sieve_script spam {
+  type = before
+  path = /etc/dovecot/sieve/spam-to-junk.sieve
+}

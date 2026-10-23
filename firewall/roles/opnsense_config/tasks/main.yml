@@ -220,6 +220,19 @@
         state: present
       loop: "{{ opnsense_dns_forwarders }}"
 
+    - name: opnsense_config | Unbound answers these names itself
+      ansibleguy.opnsense.unbound_host:
+        hostname: "{{ item.hostname }}"
+        domain: "{{ item.domain }}"
+        record_type: A
+        value: "{{ item.ip }}"
+        description: "{{ item.description | default(omit) }}"
+        match_fields: [hostname, domain, record_type]
+        state: present
+      loop: "{{ opnsense_dns_host_overrides }}"
+      loop_control:
+        label: "{{ item.hostname }}.{{ item.domain }} -> {{ item.ip }}"
+
     # ---- Dnsmasq: where it listens ----------------------------------------------
     # The dnsmasq modules find an interface by its DISPLAY name ("LAN",
     # "OPT2"), not by the identifier the rules use: 'lan' comes back as

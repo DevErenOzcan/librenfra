@@ -10,6 +10,7 @@
 #   console   autologin on the Proxmox serial console
 #   data      the persistent data disk, and /var/lib/samba on it
 #   samba     the domain, smb.conf, Kerberos, DNS and time
+#   accounts  the groups and service accounts other machines rely on
 #
 # Settings: host_vars/dc1.yml
 - name: Samba AD domain controller
@@ -34,3 +35,6 @@
       tags: [data]
     - role: samba_ad_dc
       tags: [samba]
+    # Needs the running domain.
+    - role: samba_ad_accounts
+      tags: [accounts]

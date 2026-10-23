@@ -1,0 +1,58 @@
+---
+# The mail server's desired state. From this directory, with the venv active
+# and the secrets in .env (README.md, "Secrets"):
+#
+#   ansible-playbook site.yml --check --diff     what would change
+#   ansible-playbook site.yml                    apply it
+#
+# One part at a time with --tags:
+#   console      autologin on the Proxmox serial console
+#   base         hosts, packages, the vmail user, the directory's CA
+#   data         the persistent data disk, and the mailboxes on it
+#   postfix      SMTP: mail from the receiver, submission from users
+#   dovecot      IMAP, delivery into the mailboxes, sign-in against AD
+#   rspamd       the spam filter
+#   receiver     what takes mail from Cloudflare's Email Worker
+#   cloudflared  the Cloudflare Tunnel the Worker reaches the receiver through
+#
+# Settings: host_vars/mail.yml
+- name: Mail server
+  hosts: mail_server
+  become: true
+  pre_tasks:
+    # A dry run on a fresh VM installs nothing, so the roles after mail_base
+    # would check configuration for packages that are not there yet.
+    - name: Are the mail packages installed
+      ansible.builtin.stat:
+        path: /usr/sbin/dovecot
+      register: mail_base_dovecot
+      tags: [always]
+
+    - name: Remember it for the roles below
+      ansible.builtin.set_fact:
+        mail_base_installed: "{{ mail_base_dovecot.stat.exists }}"
+      tags: [always]
+  roles:
+    - role: serial_console
+      tags: [console]
+    # Installs every package first: data_volume stops their services while
+    # it moves their directories onto the volume.
+    - role: mail_base
+      tags: [base]
+    - role: data_volume
+      tags: [data]
+      when: mail_base_installed or not ansible_check_mode
+    - role: rspamd
+      tags: [rspamd]
+      when: mail_base_installed or not ansible_check_mode
+    - role: dovecot
+      tags: [dovecot]
+      when: mail_base_installed or not ansible_check_mode
+    - role: postfix
+      tags: [postfix]
+      when: mail_base_installed or not ansible_check_mode
+    - role: mail_receiver
+      tags: [receiver]
+      when: mail_base_installed or not ansible_check_mode
+    - role: cloudflared
+      tags: [cloudflared]

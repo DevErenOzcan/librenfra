@@ -1,0 +1,9 @@
+---
+- name: dovecot | Compile the sieve script
+  ansible.builtin.command: sievec /etc/dovecot/sieve/spam-to-junk.sieve
+  changed_when: true
+
+- name: dovecot | Restart dovecot
+  ansible.builtin.systemd_service:
+    name: dovecot
+    state: restarted

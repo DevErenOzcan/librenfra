@@ -1,0 +1,18 @@
+# {{ ansible_managed }}
+#
+# The domain's mailboxes, from Active Directory: an address is a mailbox when
+# an enabled user in the mail group has it as "mail". Postfix asks for two
+# things with it - does the mailbox exist (virtual_mailbox_maps), and who may
+# send as it (smtpd_sender_login_maps: its owner signs in with the same
+# address).
+server_host = ldaps://{{ mail_ad_server }}
+version = 3
+tls_ca_cert_file = {{ mail_ad_ca_file }}
+tls_require_cert = yes
+bind = yes
+bind_dn = {{ mail_ad_bind_user }}
+bind_pw = {{ mail_ldap_password }}
+search_base = {{ mail_ad_base }}
+domain = {{ mail_domain }}
+query_filter = {{ postfix_ldap_filter }}
+result_attribute = mail

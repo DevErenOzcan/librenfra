@@ -57,7 +57,7 @@ ansible-playbook site.yml --check --diff
 ansible-playbook site.yml
 ```
 
-`--tags console|data|samba` runs one part. A run on an existing DC needs no
+`--tags console|data|samba|accounts` runs one part. A run on an existing DC needs no
 password and reports nothing to change.
 
 Terraform, from `terraform/`:
@@ -188,8 +188,32 @@ sudo samba-tool group addmembers "Domain Admins" jane.doe
 sudo samba-tool user list
 ```
 
+**A mailbox** on the mail server ([../mail_server](../mail_server/README.md))
+is an address in `mail` and membership in `Mail Users`:
+
+```bash
+sudo samba-tool user create jane.doe --mail-address=jane.doe@deverenozcan.com
+sudo samba-tool group addmembers "Mail Users" jane.doe
+```
+
 **Group Policy** is edited with RSAT's Group Policy Management from a Windows
 member; Samba keeps it in SYSVOL.
+
+### Accounts other machines rely on
+
+`host_vars/dc1.yml` declares the groups and service accounts other machines
+in this repository need, and `roles/samba_ad_accounts` (tag `accounts`)
+creates the ones missing - never changes or removes one:
+
+| Name | Kind | For |
+|---|---|---|
+| `Mail Users` | group | who has a mailbox |
+| `svc-mail` | user, password never expires | the mail server's read-only lookups |
+
+A service account's password is read from `.env` only when the account is
+created (`SAMBA_SVC_MAIL_PASSWORD`; the mail server has the same value). To
+change it later: `sudo samba-tool user setpassword svc-mail`, then the new
+value into `../mail_server/.env` and a run there.
 
 ## Rebuilding the VM
 

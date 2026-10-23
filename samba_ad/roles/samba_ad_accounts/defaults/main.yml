@@ -1,0 +1,18 @@
+---
+# Values live in host_vars/dc1.yml; these are the defaults.
+
+# Groups other machines here rely on. Created when missing; their members
+# are managed by hand (README.md, "Using it").
+#   - name: Mail Users
+#     description: "..."
+samba_ad_groups: []
+
+# Accounts other machines sign in with to read the directory. Created when
+# missing, with a password that never expires, taken from .env under
+# password_key. Existing accounts are left alone - their password too.
+#   - name: svc-mail
+#     description: "..."
+#     password_key: SAMBA_SVC_MAIL_PASSWORD
+samba_ad_service_accounts: []
+
+samba_ad_secrets_file: "{{ playbook_dir }}/.env"

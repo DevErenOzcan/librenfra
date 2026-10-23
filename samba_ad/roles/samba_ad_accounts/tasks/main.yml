@@ -1,0 +1,108 @@
+---
+# The groups and service accounts other machines in librenfra rely on (the
+# mail server's svc-mail and "Mail Users", for one). Only created when
+# missing: nothing here renames, removes or changes an existing account.
+
+# A dry run on a fresh VM installs no Samba, so there is nothing to ask yet.
+- name: samba_ad_accounts | Is Samba installed
+  ansible.builtin.stat:
+    path: /usr/bin/samba-tool
+  register: samba_ad_accounts_tool
+
+- name: samba_ad_accounts | Groups and service accounts
+  when: samba_ad_accounts_tool.stat.exists
+  block:
+    - name: samba_ad_accounts | Read the groups and users there are
+      ansible.builtin.command: "samba-tool {{ item }} list"
+      loop: [group, user]
+      register: samba_ad_accounts_lists
+      changed_when: false
+      check_mode: false
+
+    - name: samba_ad_accounts | Remember them
+      ansible.builtin.set_fact:
+        samba_ad_accounts_groups: "{{ samba_ad_accounts_lists.results[0].stdout_lines }}"
+        samba_ad_accounts_users: "{{ samba_ad_accounts_lists.results[1].stdout_lines }}"
+
+    # samba-tool cannot pretend, so a dry run skips the commands below; this
+    # says what they would do.
+    - name: samba_ad_accounts | What a real run creates
+      vars:
+        _groups: "{{ samba_ad_groups | map(attribute='name') | reject('in', samba_ad_accounts_groups) | list }}"
+        _users: "{{ samba_ad_service_accounts | map(attribute='name') | reject('in', samba_ad_accounts_users) | list }}"
+      ansible.builtin.debug:
+        msg: "Creates groups {{ _groups }} and service accounts {{ _users }}."
+      changed_when: true
+      when:
+        - ansible_check_mode
+        - (_groups + _users) | length > 0
+
+    - name: samba_ad_accounts | Groups
+      ansible.builtin.command:
+        argv:
+          - samba-tool
+          - group
+          - add
+          - "{{ item.name }}"
+          - "--description={{ item.description }}"
+      loop: "{{ samba_ad_groups }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: item.name not in samba_ad_accounts_groups
+      changed_when: true
+
+    # A new account needs its password; an existing one never reads it.
+    - name: samba_ad_accounts | Passwords for the new service accounts are in .env
+      vars:
+        _password: >-
+          {{ lookup('ansible.builtin.ini', item.password_key, type='properties',
+                    file=samba_ad_secrets_file, interpolation=false, default='')
+             if samba_ad_secrets_file is file else '' }}
+      ansible.builtin.assert:
+        that:
+          - _password | length >= 8
+          - _password is search('[A-Z]')
+          - _password is search('[a-z]')
+          - _password is search('[0-9]')
+        quiet: true
+        fail_msg: >-
+          {{ item.name }} does not exist yet, and creating it needs
+          {{ item.password_key }} in {{ samba_ad_secrets_file }}: at least 8
+          characters with upper case, lower case and a digit. Nothing about the
+          account has been changed.
+      loop: "{{ samba_ad_service_accounts }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: item.name not in samba_ad_accounts_users
+      no_log: true
+
+    - name: samba_ad_accounts | Service accounts
+      vars:
+        _password: >-
+          {{ lookup('ansible.builtin.ini', item.password_key, type='properties',
+                    file=samba_ad_secrets_file, interpolation=false, default='')
+             if samba_ad_secrets_file is file else '' }}
+      ansible.builtin.command:
+        argv:
+          - samba-tool
+          - user
+          - create
+          - "{{ item.name }}"
+          - "{{ _password }}"
+          - "--description={{ item.description }}"
+      loop: "{{ samba_ad_service_accounts }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: item.name not in samba_ad_accounts_users
+      changed_when: true
+      no_log: true
+
+    # A service has no one to change its password when it expires.
+    - name: samba_ad_accounts | Their passwords never expire
+      ansible.builtin.command:
+        argv: [samba-tool, user, setexpiry, "{{ item.name }}", --noexpiry]
+      loop: "{{ samba_ad_service_accounts }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: item.name not in samba_ad_accounts_users
+      changed_when: true

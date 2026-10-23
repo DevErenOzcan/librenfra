@@ -1,0 +1,13 @@
+---
+# Values live in host_vars/mail.yml; these are the defaults.
+
+# The tunnel's token, from .env (MAIL_CLOUDFLARED_TOKEN). Empty: cloudflared
+# is installed but does not run.
+mail_cloudflared_token: ""
+
+# Cloudflare's package repository (https://pkg.cloudflare.com). "any" serves
+# every Debian and Ubuntu release. The key was rolled over on 2025-10-30;
+# this file is the current one.
+cloudflared_key_url: https://pkg.cloudflare.com/cloudflare-main.gpg
+cloudflared_key_path: /usr/share/keyrings/cloudflare-main.gpg
+cloudflared_repo: "deb [signed-by={{ cloudflared_key_path }}] https://pkg.cloudflare.com/cloudflared any main"

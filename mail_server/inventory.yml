@@ -1,0 +1,15 @@
+---
+# The mail server, in the DMZ. The controller reaches it through its route
+# 10.10.0.0/16 via 192.168.1.201 and the firewall's WAN rule 13 (SSH from the
+# controller into the DMZ). The "ubuntu" user and the controller's key come
+# from cloud-init (terraform/main.tf). Its settings are in host_vars/mail.yml.
+all:
+  children:
+    mail_server:
+      hosts:
+        mail:
+          ansible_host: 10.10.20.10
+          ansible_user: ubuntu
+          ansible_python_interpreter: /usr/bin/python3
+          # A rebuilt VM has a new host key: ssh-keygen -R 10.10.20.10
+          ansible_ssh_common_args: "-o StrictHostKeyChecking=accept-new"

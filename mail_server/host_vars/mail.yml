@@ -1,0 +1,103 @@
+---
+# =============================================================================
+# mail (VM 130) - the mail server of deverenozcan.com, 10.10.20.10 in the DMZ
+# =============================================================================
+# An Ubuntu Server 26.04 cloud image: cloud-init has set its address, its
+# hostname and FQDN (mail.deverenozcan.com) and the controller's SSH key for
+# the "ubuntu" user (terraform/main.tf). Everything changed on top of that is
+# here; the roles' defaults/main.yml say what each value does.
+
+# --- This server -----------------------------------------------------------------
+mail_hostname: mail
+mail_domain: deverenozcan.com
+mail_fqdn: "{{ mail_hostname }}.{{ mail_domain }}"
+mail_address: 10.10.20.10
+
+# Who gets what the RFCs require a domain to accept - postmaster@, abuse@ -
+# and the server's own mail to root. An address of a mailbox here.
+mail_admin_address: eren@deverenozcan.com
+
+# --- Secrets ---------------------------------------------------------------------
+# From .env next to site.yml (git-ignored; .env.example shows the format),
+# read here so nothing has to be exported before a run. Empty when unset.
+mail_secrets_file: "{{ playbook_dir }}/.env"
+mail_ldap_password: >-
+  {{ lookup('ansible.builtin.ini', 'MAIL_LDAP_PASSWORD', type='properties',
+            file=mail_secrets_file, interpolation=false, default='')
+     if mail_secrets_file is file else '' }}
+mail_receiver_secret: >-
+  {{ lookup('ansible.builtin.ini', 'MAIL_RECEIVER_SECRET', type='properties',
+            file=mail_secrets_file, interpolation=false, default='')
+     if mail_secrets_file is file else '' }}
+mail_cloudflared_token: >-
+  {{ lookup('ansible.builtin.ini', 'MAIL_CLOUDFLARED_TOKEN', type='properties',
+            file=mail_secrets_file, interpolation=false, default='')
+     if mail_secrets_file is file else '' }}
+
+# --- The directory -------------------------------------------------------------
+# Mailboxes are the Active Directory users (../samba_ad) whose "mail"
+# attribute is set and who are in the group "Mail Users"; they sign in with
+# that address and their AD password. The mail server looks them up as
+# svc-mail, over LDAPS - the one connection the firewall lets the DMZ make
+# into the LAN (DMZ rule 25).
+mail_ad_server: dc1.ad.deverenozcan.com
+mail_ad_address: 10.10.10.10
+mail_ad_base: DC=ad,DC=deverenozcan,DC=com
+mail_ad_bind_user: svc-mail@ad.deverenozcan.com
+mail_ad_group_dn: CN=Mail Users,CN=Users,DC=ad,DC=deverenozcan,DC=com
+
+# The DC's certificate is signed by this CA, which Samba generated when the
+# domain was provisioned (2026-10-22). It is public; it expires on
+# 2028-09-21, when Samba's certificate has to be renewed and this replaced:
+#   ssh ubuntu@10.10.10.10 sudo cat /var/lib/samba/private/tls/ca.pem
+mail_ad_ca_cert: |
+  -----BEGIN CERTIFICATE-----
+  MIIFtDCCA5ygAwIBAgIEWG/aajANBgkqhkiG9w0BAQsFADB6MR0wGwYDVQQKExRT
+  YW1iYSBBZG1pbmlzdHJhdGlvbjE3MDUGA1UECxMuU2FtYmEgLSB0ZW1wb3Jhcnkg
+  YXV0b2dlbmVyYXRlZCBDQSBjZXJ0aWZpY2F0ZTEgMB4GA1UEAxMXZGMxLmFkLmRl
+  dmVyZW5vemNhbi5jb20wHhcNMjYxMDIyMjAxNzI4WhcNMjgwOTIxMjAxNzI4WjB6
+  MR0wGwYDVQQKExRTYW1iYSBBZG1pbmlzdHJhdGlvbjE3MDUGA1UECxMuU2FtYmEg
+  LSB0ZW1wb3JhcnkgYXV0b2dlbmVyYXRlZCBDQSBjZXJ0aWZpY2F0ZTEgMB4GA1UE
+  AxMXZGMxLmFkLmRldmVyZW5vemNhbi5jb20wggIiMA0GCSqGSIb3DQEBAQUAA4IC
+  DwAwggIKAoICAQCeO6L5cza7y+/TH5+W/yNe7t0z+Fi1ijETpURvN9JPOY//QWgn
+  Sig7woFnm7jPIXu9lZbf+0g5hMi8NclqmKUOFyYI//sqfXkyGUvNtRu1kgSla8S/
+  +cJH5j0z3GK8VUXb3lm+ik6j1lGYSwrBKTjBliPHJ9nJlQpDmq8tHIIHpjSFGUYK
+  YMjCCQAsQVlhmH8vKFoLwj9Xmsy6fcymoA1xmFwoVeKXnfoA0tD2tHWOzUOo/o21
+  4N3suMgHvWL2Mv9U8C70BSBqL9CGwhIDhrTzF2qw2BW8KNvWJCM1bK4duhpF+8eM
+  jPvlUmz4XC9c57l7xudq8HRN+6JQX7lRLVW2VZol/6gr//4ZEImDtYSKFul7gmge
+  J7atmI3kJbirmn+gI/VrPlDI0B80BWN/eZe+JNXk0+SZu9yvFTGuSsNwy//C93bj
+  7iF/HunvJ9cBkQsId3qCbKOmNDv6XWnf6rX3ntsbi9iTycEYSXUrF+G5+EgI03g6
+  JscEbdNmNj4HppA7VaBJYq6Lpl1lbHE+ntOIveEinizBck3sfjFvMBfTCdGyqmGd
+  +ItUM1rc3sJngP26yLq5Q7YI+AeMnrWqD/XVNN0IMpHH0y5Anfj8xt3yvemk3JNK
+  s6m6vnroh+jNhcZROFbKcV5iidnJqAg5hiJukKLw8lmQg7XgsVe2C7Of4wIDAQAB
+  o0IwQDAPBgNVHRMBAf8EBTADAQH/MA4GA1UdDwEB/wQEAwIBBjAdBgNVHQ4EFgQU
+  kQz4aHDD/TEAP1nHLnShj7501vUwDQYJKoZIhvcNAQELBQADggIBAI8D8Rx7cGLH
+  mfOm1YZd2F3iLWKXwsHl7nQ69+CBTkF3D047Z/7heHPNKwOkPLO7TWXYQiP3wypt
+  txYb6JGlUSEZhrqDEKZGKWw64OI0p0I+Rn92RnGwp1m4NOfLzGLy/SNImpnXQExG
+  n3byTERZcpRDq0dN0crHHaFdvY5mX0pAmh/UQ7Po0CHRK6nBs0g1p5sJgyL8JrDj
+  S6p1JZd7cfMokDvS4JUPVDauwhQmrM+rJ9nyuCVuOqk1Ho0yil8drqU3ykO3VQbj
+  xFodKTUQUI6Bdk+D1i8B64Wv/23Rf49IbStz24Be8sKYg6JelsvyzHa7HdIDmx/T
+  Duq1+CXnWjqAPL3XKCiL1gAy2jPx+waRehrpyw923ANCA4KRokeNSFa3Wkp1wq6/
+  WKmzAfHEP87EKpBuKd3BOlzLOsvza0w+WQ2EE3JptYD1RIJcat/rNEuXCvJpJYfG
+  XIJEYfxNeNPhU1ZKARp+AEmw1AqVN/xl5FlMLy+mGkWtIIqDUA7O9kSkecH8TsBd
+  MTLYDzPnsdULCo2y4pUoeuCfRK8AhMQZebMXJkI8GZyF8eLA/sgkOUXsogkthsvT
+  5/NQq9GKlvJbJCUzpN7vtKaBt36fXHwQtjadoLaSF8CfDzPlPk4hTEsUAqNbsmZx
+  ouNuw8cVPwZqv5+R+sTOU0ivPk5Li/z2
+  -----END CERTIFICATE-----
+
+# --- Data volume ---------------------------------------------------------------
+# VM 9130's 40 GB disk (terraform/main.tf), mounted at /mnt/data. The
+# mailboxes live on it, with rspamd's and Redis's state (what the spam
+# filter has learnt). The services that use a directory are stopped while it
+# is moved onto the volume.
+data_volume_label: mail-data
+data_volume_binds:
+  - name: vmail
+    path: /var/vmail
+    stop: [dovecot.service, postfix.service]
+  - name: rspamd
+    path: /var/lib/rspamd
+    stop: [rspamd.service]
+  - name: redis
+    path: /var/lib/redis
+    stop: [rspamd.service, redis-server.service]

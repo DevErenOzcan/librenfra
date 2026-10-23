@@ -1,0 +1,52 @@
+---
+# Dovecot 2.4: IMAP for users, LMTP for Postfix to deliver into, and the
+# sign-in check against Active Directory that Postfix's submission port uses
+# too. One configuration file, written whole (templates/dovecot.conf.j2).
+#
+# Dovecot 2.4 changed most setting names; guides written for 2.3 do not
+# apply. "doveconf -n" on the server shows what Dovecot made of the file.
+
+- name: dovecot | dovecot.conf
+  ansible.builtin.template:
+    src: dovecot.conf.j2
+    dest: /etc/dovecot/dovecot.conf
+    owner: root
+    group: dovecot
+    mode: "0640"
+  notify: dovecot | Restart dovecot
+
+- name: dovecot | The LDAP password
+  ansible.builtin.template:
+    src: ldap-password.conf.j2
+    dest: /etc/dovecot/ldap-password.conf
+    owner: root
+    group: dovecot
+    mode: "0640"
+  diff: false
+  notify: dovecot | Restart dovecot
+
+- name: dovecot | Directory for the global sieve script
+  ansible.builtin.file:
+    path: /etc/dovecot/sieve
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+# Compiled here, as root: the mailboxes' owner cannot write to /etc.
+- name: dovecot | Spam goes into Junk
+  ansible.builtin.copy:
+    src: spam-to-junk.sieve
+    dest: /etc/dovecot/sieve/spam-to-junk.sieve
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - dovecot | Compile the sieve script
+    - dovecot | Restart dovecot
+
+- name: dovecot | Dovecot runs and starts at boot
+  ansible.builtin.systemd_service:
+    name: dovecot
+    state: started
+    enabled: true

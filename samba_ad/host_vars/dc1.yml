@@ -37,3 +37,16 @@ data_volume_label: samba-data
 data_volume_binds:
   - name: samba
     path: /var/lib/samba
+
+# --- Accounts other machines rely on ---------------------------------------------
+# Created when missing, never changed afterwards (roles/samba_ad_accounts).
+# Who is in a group is managed by hand (README.md, "Using it").
+samba_ad_groups:
+  - name: Mail Users
+    description: "Has a mailbox on mail.deverenozcan.com (librenfra mail_server)"
+samba_ad_service_accounts:
+  # The mail server looks mailboxes up with it, read-only. Its password is
+  # MAIL_LDAP_PASSWORD in ../mail_server/.env as well.
+  - name: svc-mail
+    description: "Mailbox lookups for mail.deverenozcan.com (librenfra mail_server); read-only"
+    password_key: SAMBA_SVC_MAIL_PASSWORD

@@ -1,0 +1,10 @@
+---
+- name: rspamd | Restart rspamd
+  ansible.builtin.systemd_service:
+    name: rspamd
+    state: restarted
+
+- name: rspamd | Restart redis
+  ansible.builtin.systemd_service:
+    name: redis-server
+    state: restarted

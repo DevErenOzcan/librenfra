@@ -30,6 +30,8 @@ opnsense_aliases: []
 opnsense_rules: []
 opnsense_unused_rules: []
 opnsense_dns_forwarders: []
+# hostname, domain, ip, description
+opnsense_dns_host_overrides: []
 opnsense_dnsmasq_interfaces: []
 opnsense_dnsmasq_port: 53053
 opnsense_dhcp_reservations: []

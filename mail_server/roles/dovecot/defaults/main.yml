@@ -1,0 +1,27 @@
+---
+# Values live in host_vars/mail.yml; these are the defaults and what follows
+# from them.
+
+mail_domain: example.org
+
+# The directory (host_vars/mail.yml).
+mail_ad_server: ""
+mail_ad_base: ""
+mail_ad_bind_user: ""
+mail_ad_group_dn: ""
+mail_ad_ca_file: /etc/ssl/ad-ca.pem
+mail_ldap_password: ""
+
+# Who may sign in, as an LDAP filter: an enabled user in the mail group whose
+# "mail" is the address they sign in with.
+dovecot_ldap_filter: >-
+  (&(objectClass=user)(mail=%{user})(memberOf={{ mail_ad_group_dn }})(!(userAccountControl:1.2.840.113556.1.4.803:=2)))
+
+# Where the mailboxes are: /var/vmail/<domain>/<local part>, owned by vmail
+# (roles/mail_base), on the data disk.
+mail_vmail_user: vmail
+mail_vmail_home: /var/vmail
+
+# Ubuntu's self-signed certificate until the server has a real one.
+mail_tls_cert_file: /etc/ssl/certs/ssl-cert-snakeoil.pem
+mail_tls_key_file: /etc/ssl/private/ssl-cert-snakeoil.key

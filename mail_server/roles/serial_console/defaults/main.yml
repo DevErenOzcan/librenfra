@@ -1,0 +1,6 @@
+---
+# Who the Proxmox serial console logs in as. The cloud image's default user
+# has no password, so without autologin the console could show a login
+# prompt but never get past it.
+serial_console_user: ubuntu
+serial_console_tty: ttyS0

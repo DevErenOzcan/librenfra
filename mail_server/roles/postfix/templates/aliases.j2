@@ -1,0 +1,4 @@
+# {{ ansible_managed }}
+# The server's own mail: whatever reaches root goes to the admin.
+postmaster: root
+root: {{ mail_admin_address }}

@@ -1,0 +1,64 @@
+---
+# The persistent data disk: a volume Terraform carves out of the host's
+# "vmdata" storage and attaches as scsi1. It is owned by a holder VM, not by
+# this one, so it survives this VM being destroyed and rebuilt. What has to
+# survive lives on it (data_volume_binds).
+#
+# Found by its stable SCSI path and its filesystem label. Formatted only when
+# the disk is completely blank - no partition table, no filesystem, nothing
+# blkid recognises - so a disk with anything on it is never touched.
+
+- name: data_volume | Is the data disk attached
+  ansible.builtin.stat:
+    path: "{{ data_volume_device }}"
+  register: data_volume_dev
+
+- name: data_volume | The data disk is missing
+  ansible.builtin.fail:
+    msg: >-
+      {{ data_volume_device }} does not exist. The disk is VM 9130's, attached
+      to this VM as scsi1 by terraform/main.tf; check that the VM has it.
+      Nothing was changed.
+  when: not data_volume_dev.stat.exists
+
+- name: data_volume | Read what is on the disk
+  ansible.builtin.command: "blkid -p -o export {{ data_volume_device }}"
+  register: data_volume_probe
+  changed_when: false
+  failed_when: data_volume_probe.rc not in [0, 2]
+  check_mode: false
+
+- name: data_volume | The disk is blank or carries this volume
+  ansible.builtin.assert:
+    that: >-
+      data_volume_probe.rc == 2
+      or ('LABEL=' ~ data_volume_label) in data_volume_probe.stdout_lines
+    quiet: true
+    fail_msg: >-
+      {{ data_volume_device }} carries something other than the
+      "{{ data_volume_label }}" filesystem:
+      {{ data_volume_probe.stdout_lines | join(' ') }}. This role only
+      formats a blank disk. Nothing was changed.
+
+- name: data_volume | Create the filesystem on the blank disk
+  community.general.filesystem:
+    dev: "{{ data_volume_device }}"
+    fstype: "{{ data_volume_fstype }}"
+    opts: "-L {{ data_volume_label }}"
+  when: data_volume_probe.rc == 2
+
+# nofail: a missing data disk must not drop the machine into emergency mode.
+- name: data_volume | Mount it and keep it in fstab
+  ansible.posix.mount:
+    path: "{{ data_volume_mountpoint }}"
+    src: "LABEL={{ data_volume_label }}"
+    fstype: "{{ data_volume_fstype }}"
+    opts: defaults,nofail
+    state: mounted
+
+- name: data_volume | Directories that live on the volume
+  ansible.builtin.include_tasks: bind.yml
+  loop: "{{ data_volume_binds }}"
+  loop_control:
+    loop_var: bind
+    label: "{{ bind.path }}"

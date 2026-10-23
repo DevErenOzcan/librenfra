@@ -1,0 +1,41 @@
+---
+# Values live in host_vars/mail.yml; these are the defaults and what follows
+# from them.
+
+# The VM's hostname (its name in terraform/main.tf) and the domain it serves.
+mail_hostname: mail
+mail_domain: example.org
+mail_fqdn: "{{ mail_hostname }}.{{ mail_domain }}"
+# Its fixed DMZ address.
+mail_address: ""
+
+# The domain controller, by name: its certificate is issued to that name, so
+# the name has to resolve - here, through /etc/hosts, since the DMZ's resolver
+# does not know the AD domain.
+mail_ad_server: ""
+mail_ad_address: ""
+# The CA that signed the DC's certificate (PEM), trusted for LDAPS only.
+mail_ad_ca_cert: ""
+mail_ad_ca_file: /etc/ssl/ad-ca.pem
+
+# Every package the mail server runs on, installed before data_volume moves
+# their directories onto the data disk.
+mail_base_packages:
+  - postfix
+  - postfix-ldap
+  - dovecot-imapd
+  - dovecot-lmtpd
+  - dovecot-ldap
+  - dovecot-sieve
+  - rspamd
+  - redis-server
+  - ssl-cert
+  - swaks
+  - ldap-utils
+
+# The owner of every mailbox. The uid and gid are fixed because the mailboxes
+# outlive the VM on the data disk: a rebuilt VM must own them under the same
+# numbers.
+mail_vmail_user: vmail
+mail_vmail_uid: 5000
+mail_vmail_home: /var/vmail

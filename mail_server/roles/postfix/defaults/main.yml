@@ -1,0 +1,33 @@
+---
+# Values live in host_vars/mail.yml; these are the defaults and what follows
+# from them.
+
+mail_hostname: mail
+mail_domain: example.org
+mail_fqdn: "{{ mail_hostname }}.{{ mail_domain }}"
+mail_admin_address: "postmaster@{{ mail_domain }}"
+
+# The directory the mailboxes come from (host_vars/mail.yml).
+mail_ad_server: ""
+mail_ad_base: ""
+mail_ad_bind_user: ""
+mail_ad_group_dn: ""
+mail_ad_ca_file: /etc/ssl/ad-ca.pem
+mail_ldap_password: ""
+
+# Who has a mailbox, as an LDAP filter on "mail": a user in the mail group,
+# not disabled (bit 2 of userAccountControl).
+postfix_ldap_filter: >-
+  (&(objectClass=user)(mail=%s)(memberOf={{ mail_ad_group_dn }})(!(userAccountControl:1.2.840.113556.1.4.803:=2)))
+
+# Ubuntu's self-signed certificate until the server has a real one.
+mail_tls_cert_file: /etc/ssl/certs/ssl-cert-snakeoil.pem
+mail_tls_key_file: /etc/ssl/private/ssl-cert-snakeoil.key
+
+# Cloudflare takes messages up to 25 MiB; the headers added on the way need
+# a little room on top.
+postfix_message_size_limit: 31457280
+
+# Mail to anywhere outside the domain is refused until sending is set up
+# (README.md, "Sending").
+postfix_default_transport: "error:5.7.1 Sending mail outside {{ mail_domain }} is not set up yet"

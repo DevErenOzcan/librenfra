@@ -1,0 +1,12 @@
+---
+- name: postfix | Rebuild the alias tables
+  ansible.builtin.command: "{{ item }}"
+  loop:
+    - postmap /etc/postfix/virtual
+    - newaliases
+  changed_when: true
+
+- name: postfix | Restart postfix
+  ansible.builtin.systemd_service:
+    name: postfix
+    state: restarted

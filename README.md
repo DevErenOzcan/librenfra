@@ -9,6 +9,7 @@ repository.
 |---|---|---|
 | [`firewall/`](firewall/README.md) | VM 100 `opnsense-fw`: OPNsense, WAN `192.168.1.201`, gateway of LAN, DMZ and LAB | Terraform (the VM), Ansible over the OPNsense API (the policy) |
 | [`samba_ad/`](samba_ad/README.md) | VM 120 `dc1`: Samba AD domain controller for `ad.deverenozcan.com`, `10.10.10.10`, and VM 9120 that holds its data | Terraform and Ansible |
+| [`mail_server/`](mail_server/README.md) | VM 130 `mail`: Postfix, Dovecot and rspamd for `deverenozcan.com`, `10.10.20.10` in the DMZ, mailboxes from AD, mail in through Cloudflare (not set up yet); VM 9130 holds its data | Terraform and Ansible |
 
 **Each directory stands on its own.** It has its own `ansible.cfg`,
 inventory, settings, roles, Terraform and secrets, and every command for that
@@ -41,14 +42,22 @@ internet ── home router 192.168.1.1
    10.10.10.0/24       10.10.20.0/24      10.10.30.0/24
    trusted             faces the          experiments,
    dc1 .10             internet           quarantine
+                       mail .10
 ```
 
 The segments are bridges inside the host; the firewall is their only way out.
 The LAN is trusted and reachable from home; DMZ and LAB reach the internet
-and nothing else. The rules are in [firewall/README.md](firewall/README.md).
+and nothing else - except the mail server's LDAPS lookups on the DC. The
+rules are in [firewall/README.md](firewall/README.md).
+
+The home connection is behind the ISP's carrier-grade NAT, so nothing here
+can be reached from the internet directly, and no port forward would change
+that. What has to come in does through Cloudflare, which holds the domain:
+mail through Email Routing and a tunnel ([mail_server/README.md](mail_server/README.md)).
 
 VM IDs: the firewall is 100, the desktop 102; servers get their own (the DC
-120), and a server's data disk is held by VM 9000 + its ID.
+120, the mail server 130), and a server's data disk is held by VM 9000 + its
+ID.
 
 ## The controller
 
@@ -63,6 +72,7 @@ ubuntu-desktop (192.168.1.202)
   terraform ──────── HTTPS ────▶ pve1:8006 (Proxmox API)        */terraform/
   ansible-playbook ─ HTTPS ────▶ opnsense-fw:443 (OPNsense API) firewall/
                    ─ SSH ──────▶ dc1 (10.10.10.10)              samba_ad/
+                   ─ SSH ──────▶ mail (10.10.20.10)             mail_server/
 ```
 
 ### Setting up the controller
@@ -79,7 +89,7 @@ Activate it (`. .venv/bin/activate`) before running anything. Each directory
 lists the collections its roles need:
 
 ```bash
-ansible-galaxy collection install -r firewall/requirements.yml -r samba_ad/requirements.yml
+ansible-galaxy collection install -r firewall/requirements.yml -r samba_ad/requirements.yml -r mail_server/requirements.yml
 ```
 
 Terraform comes with the desktop's packages. The controller's SSH key,
@@ -95,7 +105,8 @@ how to make them, and an `.example` file next to each shows the format.
 | `*/terraform/secret.tfvars` | the host's root password, for the Proxmox API |
 | `*/terraform/terraform.tfstate` | what Terraform manages - not secret, but only here |
 | `firewall/.env` | the OPNsense API key |
-| `samba_ad/.env` | the domain's Administrator password |
+| `samba_ad/.env` | the domain's Administrator password, and the passwords of the service accounts it creates |
+| `mail_server/.env` | `svc-mail`'s password (the same as in `samba_ad/.env`), the receiver's shared secret, the tunnel token |
 
 Keep a copy of all of them, and of `~/.ssh/id_ed25519`, off the laptop: the
 desktop's data disk is persistent, not backed up.
@@ -106,3 +117,4 @@ desktop's data disk is persistent, not backed up.
    then the desktop as the controller.
 2. [firewall/README.md](firewall/README.md): the firewall.
 3. [samba_ad/README.md](samba_ad/README.md): the domain controller.
+4. [mail_server/README.md](mail_server/README.md): the mail server.

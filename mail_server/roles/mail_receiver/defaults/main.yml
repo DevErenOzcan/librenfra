@@ -1,0 +1,11 @@
+---
+# Values live in host_vars/mail.yml; these are the defaults.
+
+# Where the receiver listens; cloudflared forwards the tunnel's hostname here.
+mail_receiver_port: 8025
+# The shared secret the Worker sends along (host_vars/mail.yml, from .env).
+mail_receiver_secret: ""
+# The name it greets Postfix with.
+mail_hostname: mail
+mail_domain: example.org
+mail_fqdn: "{{ mail_hostname }}.{{ mail_domain }}"

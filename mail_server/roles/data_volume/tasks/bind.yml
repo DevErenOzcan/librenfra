@@ -1,0 +1,58 @@
+---
+# One directory on the data volume, bind-mounted over its usual place.
+# The first time on this volume, the directory's current content is copied
+# over. After that the volume's copy wins: a rebuilt VM gets its old one back,
+# and what the fresh OS disk had there stays hidden underneath.
+
+- name: "data_volume | Is {{ bind.path }} already bound"
+  ansible.builtin.command: "findmnt --mountpoint {{ bind.path }}"
+  register: data_volume_bound
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: "data_volume | Is {{ bind.name }} on the volume yet"
+  ansible.builtin.stat:
+    path: "{{ data_volume_mountpoint }}/{{ bind.name }}"
+  register: data_volume_src
+
+- name: "data_volume | Move {{ bind.path }} onto the volume"
+  when: data_volume_bound.rc != 0
+  block:
+    # Not every image ships it.
+    - name: "data_volume | rsync is installed"
+      ansible.builtin.apt:
+        name: rsync
+        state: present
+      when: not data_volume_src.stat.exists
+
+    # Nothing may keep files open under the old place while it is copied and
+    # then covered, so the units that use it are stopped first.
+    - name: "data_volume | Stop what uses {{ bind.path }}"
+      ansible.builtin.systemd_service:
+        name: "{{ item }}"
+        state: stopped
+      loop: "{{ bind.stop | default([]) }}"
+
+    - name: "data_volume | Copy {{ bind.path }} onto the volume (first time only)"
+      ansible.builtin.command: >-
+        rsync -aHAX --numeric-ids {{ bind.path }}/
+        {{ data_volume_mountpoint }}/{{ bind.name }}/
+      changed_when: true
+      when: not data_volume_src.stat.exists
+
+    - name: "data_volume | Bind it over {{ bind.path }} and keep it in fstab"
+      ansible.posix.mount:
+        path: "{{ bind.path }}"
+        src: "{{ data_volume_mountpoint }}/{{ bind.name }}"
+        fstype: none
+        opts: "bind,nofail,x-systemd.requires-mounts-for={{ data_volume_mountpoint }}"
+        state: mounted
+
+  # Also after a failure: nothing stopped above may stay down.
+  always:
+    - name: "data_volume | Start what was stopped"
+      ansible.builtin.systemd_service:
+        name: "{{ item }}"
+        state: started
+      loop: "{{ bind.start | default(bind.stop | default([])) }}"

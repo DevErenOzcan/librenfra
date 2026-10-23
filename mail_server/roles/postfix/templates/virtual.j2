@@ -1,0 +1,5 @@
+# {{ ansible_managed }}
+# Addresses of the domain that are not mailboxes. After a change:
+# postmap /etc/postfix/virtual (the role's handler does it).
+postmaster@{{ mail_domain }}    {{ mail_admin_address }}
+abuse@{{ mail_domain }}         {{ mail_admin_address }}

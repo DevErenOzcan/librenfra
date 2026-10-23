@@ -1,0 +1,55 @@
+---
+# rspamd, the spam filter Postfix hands every message to (a milter on
+# 127.0.0.1:11332, as Ubuntu configures it), and Redis, which keeps what it
+# learns. Only the differences from Ubuntu's defaults are written, as files
+# in /etc/rspamd/local.d.
+#
+# Every message reaches Postfix from the receiver on 127.0.0.1, and rspamd
+# skips its checks of the connecting client (SPF, HELO) for a local address
+# by itself; Cloudflare has checked SPF when it took the message. DKIM, DMARC
+# and the content are still judged here.
+
+- name: rspamd | Settings that differ from the defaults
+  ansible.builtin.copy:
+    src: "local.d/{{ item }}"
+    dest: "/etc/rspamd/local.d/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - actions.conf
+    - greylist.conf
+    - redis.conf
+    - classifier-bayes.conf
+    - groups.conf
+  notify: rspamd | Restart rspamd
+
+# The packages create their users with whatever IDs are free, so a rebuilt VM
+# may give them other numbers than the files on the data disk carry.
+- name: rspamd | State directories belong to their service
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.owner }}"
+    recurse: true
+  loop: "{{ rspamd_state_dirs }}"
+  loop_control:
+    label: "{{ item.path }}"
+  notify:
+    - rspamd | Restart redis
+    - rspamd | Restart rspamd
+
+- name: rspamd | The configuration passes rspamadm configtest
+  ansible.builtin.command: rspamadm configtest
+  changed_when: false
+  check_mode: false
+
+- name: rspamd | Redis and rspamd run and start at boot
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    state: started
+    enabled: true
+  loop:
+    - redis-server
+    - rspamd

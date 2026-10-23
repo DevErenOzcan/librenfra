@@ -1,0 +1,76 @@
+---
+# Postfix: the domain's SMTP server. It takes mail for the domain from the
+# receiver on 127.0.0.1:25, mail from signed-in users on 587, has rspamd scan
+# both, and hands mailboxes' mail to Dovecot over LMTP. The whole
+# configuration is written here; the package installed none
+# (roles/mail_base).
+
+- name: postfix | The LDAP password is in .env
+  ansible.builtin.assert:
+    that: mail_ldap_password | length > 0
+    quiet: true
+    fail_msg: >-
+      No MAIL_LDAP_PASSWORD in {{ mail_secrets_file | default('.env') }}:
+      Postfix and Dovecot look the mailboxes up in AD with it (README.md,
+      "Secrets"). Nothing has been changed.
+  no_log: true
+
+- name: postfix | main.cf and master.cf
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/postfix/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - main.cf
+    - master.cf
+  notify: postfix | Restart postfix
+
+# Holds the svc-mail password: readable by Postfix's proxymap, nobody else.
+- name: postfix | The AD lookup
+  ansible.builtin.template:
+    src: ldap-users.cf.j2
+    dest: /etc/postfix/ldap-users.cf
+    owner: root
+    group: postfix
+    mode: "0640"
+  diff: false
+  notify: postfix | Restart postfix
+
+- name: postfix | Aliases
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - { src: virtual.j2, dest: /etc/postfix/virtual }
+    - { src: aliases.j2, dest: /etc/aliases }
+  loop_control:
+    label: "{{ item.dest }}"
+  notify: postfix | Rebuild the alias tables
+
+# The alias tables must exist before Postfix starts; a fresh VM has none.
+- name: postfix | Build the alias tables now if they are missing
+  ansible.builtin.command: "{{ item.cmd }}"
+  args:
+    creates: "{{ item.creates }}"
+  loop:
+    - { cmd: postmap /etc/postfix/virtual, creates: /etc/postfix/virtual.db }
+    - { cmd: newaliases, creates: /etc/aliases.db }
+  loop_control:
+    label: "{{ item.cmd }}"
+
+# Reads the files as they are on disk: in a dry run, the old ones.
+- name: postfix | The configuration passes postfix check
+  ansible.builtin.command: postfix check
+  changed_when: false
+  check_mode: false
+
+- name: postfix | Postfix runs and starts at boot
+  ansible.builtin.systemd_service:
+    name: postfix
+    state: started
+    enabled: true

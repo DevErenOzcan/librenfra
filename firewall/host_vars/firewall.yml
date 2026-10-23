@@ -137,6 +137,17 @@ opnsense_rules:
     source_net: "{{ opnsense_segments.dmz.cidr }}"
     destination_net: HOME_LAN
 
+  # The one way from the DMZ into the LAN: the mail server looks mailboxes
+  # and passwords up on the domain controller (../mail_server), over LDAPS.
+  - description: "Mail server may query the directory over LDAPS"
+    interface: "{{ opnsense_if.dmz }}"
+    sequence: 25
+    action: pass
+    protocol: TCP
+    source_net: 10.10.20.10
+    destination_net: 10.10.10.10
+    destination_port: 636
+
   # LAB_NETS holds the gateways too, so this also drops ping to the gateway;
   # only DNS (sequence 10) reaches it.
   - description: "DMZ must not pivot into LAN or LAB"
@@ -196,6 +207,16 @@ opnsense_unused_rules: []
 # General) is 192.168.1.1 as well.
 opnsense_dns_forwarders:
   - 192.168.1.1
+
+# Names Unbound answers itself, for the machines behind the firewall. Matched
+# by hostname and domain, so changing an address updates the entry.
+opnsense_dns_host_overrides:
+  # The mail server: clients inside connect to it directly, not through
+  # Cloudflare.
+  - hostname: mail
+    domain: deverenozcan.com
+    ip: 10.10.20.10
+    description: "The mail server (librenfra mail_server)"
 
 # --- DHCP ------------------------------------------------------------------------
 # Dnsmasq serves DHCP on the segments with a pool, LAN and LAB. Its DNS

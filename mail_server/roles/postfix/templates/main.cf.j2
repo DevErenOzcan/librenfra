@@ -1,0 +1,58 @@
+# {{ ansible_managed }}
+#
+# Postfix for {{ mail_domain }}: receives the domain's mail from the receiver
+# (port 25 on 127.0.0.1 only), takes mail from signed-in users on 587, and
+# delivers to Dovecot over LMTP. librenfra, mail_server/roles/postfix.
+compatibility_level = 3.10
+myhostname = {{ mail_fqdn }}
+mydomain = {{ mail_domain }}
+myorigin = $myhostname
+inet_protocols = ipv4
+biff = no
+append_dot_mydomain = no
+smtpd_banner = $myhostname ESMTP
+message_size_limit = {{ postfix_message_size_limit }}
+mailbox_size_limit = 0
+
+# The server's own mail (cron, root) is local, and goes on to the admin.
+mydestination = $myhostname, localhost.$mydomain, localhost
+mynetworks = 127.0.0.0/8
+alias_maps = hash:/etc/aliases
+alias_database = hash:/etc/aliases
+
+# The domain: a mailbox for every AD user in the mail group.
+virtual_mailbox_domains = {{ mail_domain }}
+virtual_mailbox_maps = proxy:ldap:/etc/postfix/ldap-users.cf
+virtual_alias_maps = hash:/etc/postfix/virtual
+virtual_transport = lmtp:unix:private/dovecot-lmtp
+
+# Nothing leaves yet.
+default_transport = {{ postfix_default_transport }}
+
+# Port 25 takes mail for the domain only - from anyone, as it all comes
+# through Cloudflare and the receiver. Unknown recipients are refused there
+# and then, so the sender hears it straight away.
+smtpd_helo_required = yes
+smtpd_relay_restrictions = reject_unauth_destination
+smtpd_recipient_restrictions = reject_non_fqdn_recipient, reject_unauth_destination
+
+# Signing in on 587 (master.cf): Dovecot checks the password against AD, and
+# a user may only send as their own address.
+smtpd_sasl_type = dovecot
+smtpd_sasl_path = private/auth
+smtpd_sasl_auth_enable = no
+smtpd_sender_login_maps = proxy:ldap:/etc/postfix/ldap-users.cf
+
+# TLS
+smtpd_tls_cert_file = {{ mail_tls_cert_file }}
+smtpd_tls_key_file = {{ mail_tls_key_file }}
+smtpd_tls_security_level = may
+smtpd_tls_auth_only = yes
+smtp_tls_security_level = may
+smtp_tls_CApath = /etc/ssl/certs
+
+# rspamd scans every message. If it is down, mail is accepted unscanned.
+smtpd_milters = inet:127.0.0.1:11332
+non_smtpd_milters = $smtpd_milters
+milter_default_action = accept
+milter_protocol = 6

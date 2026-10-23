@@ -1,0 +1,129 @@
+---
+# What every other role here stands on: the server's own name and the DC's,
+# the packages, the owner of the mailboxes, and the CA the DC's LDAPS
+# certificate is checked against.
+
+- name: mail_base | The VM's hostname is the one this server is configured for
+  ansible.builtin.assert:
+    that: ansible_facts['hostname'] == mail_hostname
+    quiet: true
+    fail_msg: >-
+      The VM is called {{ ansible_facts['hostname'] }}, but mail_hostname is
+      {{ mail_hostname }}. The VM's name in terraform/main.tf and
+      mail_hostname in host_vars/mail.yml must match.
+
+# --- names ------------------------------------------------------------------
+# Proxmox's cloud-init user-data sets manage_etc_hosts, so cloud-init rewrites
+# /etc/hosts at every boot from this template: the template is what keeps the
+# DC's name here.
+- name: mail_base | /etc/hosts as cloud-init renders it at boot
+  ansible.builtin.copy:
+    dest: /etc/cloud/templates/hosts.debian.tmpl
+    content: |
+      ## template:jinja
+      {{ mail_base_hosts }}
+    owner: root
+    group: root
+    mode: "0644"
+  vars:
+    mail_base_hosts: &mail_base_hosts |-
+      # Managed by Ansible (librenfra mail_server, role mail_base).
+      127.0.0.1 localhost
+      127.0.1.1 {{ mail_fqdn }} {{ mail_hostname }}
+      # The domain controller: its LDAPS certificate is issued to this name.
+      {{ mail_ad_address }} {{ mail_ad_server }}
+
+      ::1 localhost ip6-localhost ip6-loopback
+      ff02::1 ip6-allnodes
+      ff02::2 ip6-allrouters
+
+- name: mail_base | /etc/hosts
+  ansible.builtin.copy:
+    dest: /etc/hosts
+    content: "{{ mail_base_hosts }}\n"
+    owner: root
+    group: root
+    mode: "0644"
+  vars:
+    mail_base_hosts: *mail_base_hosts
+
+# --- packages ---------------------------------------------------------------
+# Postfix asks how to configure itself on install; the answer is "not at
+# all" - roles/postfix writes its whole configuration.
+- name: mail_base | Postfix installs without a configuration of its own
+  ansible.builtin.debconf:
+    name: postfix
+    question: postfix/main_mailer_type
+    vtype: select
+    value: No configuration
+
+- name: mail_base | Packages
+  ansible.builtin.apt:
+    name: "{{ mail_base_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: mail_base | Dry-run note
+  ansible.builtin.debug:
+    msg: >-
+      The mail packages are not installed yet and a dry run installs nothing,
+      so the data volume and the services' configuration are not checked. A
+      real run sets them up.
+  when:
+    - ansible_check_mode
+    - not mail_base_installed | default(true)
+
+# --- the owner of the mailboxes ---------------------------------------------
+- name: mail_base | Group vmail
+  ansible.builtin.group:
+    name: "{{ mail_vmail_user }}"
+    gid: "{{ mail_vmail_uid }}"
+    system: true
+
+- name: mail_base | User vmail
+  ansible.builtin.user:
+    name: "{{ mail_vmail_user }}"
+    uid: "{{ mail_vmail_uid }}"
+    group: "{{ mail_vmail_user }}"
+    home: "{{ mail_vmail_home }}"
+    create_home: false
+    shell: /usr/sbin/nologin
+    system: true
+
+# data_volume moves it onto the data disk. A dry run on a fresh VM has not
+# created the user it would belong to.
+- name: mail_base | The mailboxes' directory
+  ansible.builtin.file:
+    path: "{{ mail_vmail_home }}"
+    state: directory
+    owner: "{{ mail_vmail_user }}"
+    group: "{{ mail_vmail_user }}"
+    mode: "0750"
+  when: mail_base_installed | default(true) or not ansible_check_mode
+
+# --- the directory's CA -------------------------------------------------------
+# Trusted by the LDAP clients only - Postfix, Dovecot, ldapsearch - not added
+# to the system's store.
+- name: mail_base | The CA of the domain controller's certificate
+  ansible.builtin.copy:
+    dest: "{{ mail_ad_ca_file }}"
+    content: "{{ mail_ad_ca_cert }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+# Dovecot 2.4's LDAP connection takes its CA from here, through libldap, and
+# not from its own ssl_client_ca_file: with that alone it "Can't connect"
+# (2026-10-23).
+- name: mail_base | LDAP clients trust the DC's CA
+  ansible.builtin.copy:
+    dest: /etc/ldap/ldap.conf
+    content: |
+      # Managed by Ansible (librenfra mail_server, role mail_base).
+      # The one LDAP server here is the domain controller; trust the CA that
+      # signed its certificate.
+      TLS_CACERT {{ mail_ad_ca_file }}
+    owner: root
+    group: root
+    mode: "0644"

@@ -1,0 +1,22 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Hands mail from Cloudflare's Email Worker to Postfix
+After=network.target postfix.service
+
+[Service]
+ExecStart=/usr/bin/python3 -I /usr/local/lib/mail-receiver/receiver.py
+Environment=RECEIVER_PORT={{ mail_receiver_port }}
+Environment=RECEIVER_HELO={{ mail_fqdn }}
+LoadCredential=secret:/etc/mail-receiver/secret
+Restart=on-failure
+# Needs nothing but a port on 127.0.0.1 and one to Postfix.
+DynamicUser=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+RestrictAddressFamilies=AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

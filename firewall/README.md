@@ -67,7 +67,8 @@ Asymmetric on purpose:
   `192.168.1.201`), the firewall, DMZ, LAB, the internet - and the home
   network reaches it.
 - **DMZ and LAB reach the internet and nothing else.** Nothing there can open
-  a connection into the LAN, the home network or the other segment.
+  a connection into the LAN, the home network or the other segment - with
+  one exception: the mail server's lookups on the domain controller (DMZ 25).
 - **From home, only the LAN is reachable**, plus SSH from the controller into
   the DMZ. LAB machines are reached through a LAN machine.
 
@@ -80,6 +81,7 @@ Asymmetric on purpose:
 | LAN | 50 | pass | 10.10.10.0/24 | any | any, not logged |
 | DMZ, LAB | 10 | pass | the segment | its gateway | TCP/UDP 53 |
 | DMZ, LAB | 20 | **block** | the segment | `HOME_LAN` | any |
+| DMZ | 25 | pass | 10.10.20.10 (mail) | 10.10.10.10 (dc1) | TCP 636 (LDAPS) |
 | DMZ, LAB | 30 | **block** | the segment | `LAB_NETS` | any |
 | DMZ, LAB | 40 | pass | the segment | any | any |
 
@@ -96,7 +98,9 @@ leaves as `192.168.1.201`. No port forwards anywhere.
 ### DNS and DHCP
 
 The segments cannot ask the home router, so **Unbound** on the firewall
-answers them on port 53 and forwards everything to `192.168.1.1`.
+answers them on port 53 and forwards everything to `192.168.1.1`. It answers
+`mail.deverenozcan.com` itself, with the mail server's `10.10.20.10`, so mail
+clients inside reach it directly (`opnsense_dns_host_overrides`).
 **Dnsmasq** does DHCP only - its DNS port is moved to 53053 - on the two
 segments with a pool: LAN `10.10.10.100-245` and LAB `10.10.30.100-199`. The
 DMZ has none; its guests are cloud images with addresses cloud-init sets. So

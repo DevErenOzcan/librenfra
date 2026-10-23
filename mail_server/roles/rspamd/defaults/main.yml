@@ -1,0 +1,6 @@
+---
+# rspamd's settings are the files in files/local.d; nothing to set per host.
+# Where its and Redis's state live (on the data disk, host_vars/mail.yml).
+rspamd_state_dirs:
+  - { path: /var/lib/rspamd, owner: _rspamd }
+  - { path: /var/lib/redis, owner: redis }
