@@ -5,9 +5,10 @@
 *.tfvars
 *.tfplan
 
-# Ansible
+# Ansible, Python
 *.retry
 collections/
+__pycache__/
 
 # Secrets and the controller's Python environment
 .env

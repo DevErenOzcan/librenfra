@@ -10,7 +10,8 @@ cloudflared runs on this server:
     X-Receiver-Secret: <the shared secret>
     X-Envelope-From:   <sender>      percent-encoded; empty for a bounce
     X-Envelope-To:     <recipient>   percent-encoded; one per request
-    body:              the raw message, as received
+    body:              the raw message, as received (with a Content-Length,
+                       or chunked)
 
 and gets back what Postfix said, so a refusal reaches the sender:
 
@@ -51,14 +52,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
         sender = urllib.parse.unquote(self.headers.get('X-Envelope-From', ''))
         recipient = urllib.parse.unquote(self.headers.get('X-Envelope-To', ''))
         try:
-            length = int(self.headers.get('Content-Length', ''))
-        except ValueError:
-            return self.answer(400, 'Content-Length is required')
-        if not recipient or length <= 0:
-            return self.answer(400, 'a recipient and a message are required')
-        if length > MAX_BYTES:
+            message = self.read_body()
+        except ValueError as e:
+            return self.answer(400, str(e))
+        except OverflowError:
             return self.answer(413, 'message too large')
-        message = self.rfile.read(length)
+        if not recipient or not message:
+            return self.answer(400, 'a recipient and a message are required')
+        length = len(message)
 
         options = ['BODY=8BITMIME']
         if not (sender + recipient).isascii():
@@ -76,6 +77,32 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.answer(503, 'mail server unavailable')
         self.log_message('%s -> %s: queued (%d bytes)', sender, recipient, length)
         return self.answer(200, 'queued')
+
+    def read_body(self):
+        """The request body, sent with a Content-Length or chunked (as a proxy
+        in front may pass it on); at most MAX_BYTES."""
+        if self.headers.get('Transfer-Encoding', '').lower() == 'chunked':
+            body = bytearray()
+            while True:
+                try:
+                    size = int(self.rfile.readline().split(b';')[0].strip(), 16)
+                except ValueError:
+                    raise ValueError('malformed chunked body')
+                if size == 0:
+                    while self.rfile.readline() not in (b'\r\n', b'\n', b''):
+                        pass  # trailers
+                    return bytes(body)
+                if len(body) + size > MAX_BYTES:
+                    raise OverflowError
+                body += self.rfile.read(size)
+                self.rfile.readline()  # the CRLF after each chunk
+        try:
+            length = int(self.headers.get('Content-Length', ''))
+        except ValueError:
+            raise ValueError('Content-Length or chunked transfer encoding is required')
+        if length > MAX_BYTES:
+            raise OverflowError
+        return self.rfile.read(length)
 
     def postfix_said(self, code, text, sender, recipient):
         text = text.decode(errors='replace') if isinstance(text, bytes) else str(text)

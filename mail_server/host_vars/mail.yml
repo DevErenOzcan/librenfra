@@ -15,7 +15,7 @@ mail_address: 10.10.20.10
 
 # Who gets what the RFCs require a domain to accept - postmaster@, abuse@ -
 # and the server's own mail to root. An address of a mailbox here.
-mail_admin_address: eren@deverenozcan.com
+mail_admin_address: eren.ozcan@deverenozcan.com
 
 # --- Secrets ---------------------------------------------------------------------
 # From .env next to site.yml (git-ignored; .env.example shows the format),

@@ -13,13 +13,14 @@ in with their address and their AD password.
 | `inventory.yml` | how the controller reaches it: `ubuntu@10.10.20.10` over SSH |
 | `roles/` | `serial_console`, `mail_base`, `data_volume`, `rspamd`, `dovecot`, `postfix`, `mail_receiver`, `cloudflared` |
 | `terraform/` | VM 130 and VM 9130, which holds its data disk |
+| `cloudflare/` | the way in on Cloudflare: tunnel, Access, the Email Worker (`worker/`), Email Routing; its own Terraform state |
 | `.env` | the secrets (git-ignored; `.env.example` shows the format) |
 | `ansible.cfg`, `requirements.yml` | Ansible settings and the collections the roles need |
 
-**Status: built on 2026-10-23, waiting for the Cloudflare side.** The server
-runs and delivers mail inside the domain; mail from the internet arrives once
-the Worker and the tunnel exist ([How mail gets in](#how-mail-gets-in)), and
-sending to the internet is not set up ([Sending](#sending)). No mailbox
+**Status: built on 2026-10-23; the Cloudflare side is written, not set up.**
+The server runs and delivers mail inside the domain; mail from the internet
+arrives once `cloudflare/` is applied ([Setting up the way in](#setting-up-the-way-in)),
+and sending to the internet is not set up ([Sending](#sending)). No mailbox
 exists yet - not even `mail_admin_address`'s, so mail to `postmaster@`
 bounces until it does.
 
@@ -52,9 +53,105 @@ VM 130: receiver 127.0.0.1:8025 ─▶ Postfix 127.0.0.1:25 ─▶ rspamd
 - **Nothing leaves the server unasked.** cloudflared dials out to Cloudflare
   (the DMZ may reach the internet, firewall rule DMZ 40); the receiver and
   Postfix's port 25 listen on 127.0.0.1 only.
-- **The Cloudflare side - the Worker, the tunnel, Access, the routing rule -
-  is not written yet.** Until then, Cloudflare Email Routing forwards the
-  domain's mail as it does today.
+- **The Worker** (`cloudflare/worker/mail-inbound.js`) delivers on `200
+  queued`, rejects on `422`, and on anything else - the server down, busy,
+  unreachable, Access in the way - forwards the message to a fallback
+  address, so nothing is lost. `mail-inbound.test.mjs` tests those
+  decisions without Cloudflare (`node mail-inbound.test.mjs`).
+- **Only the Worker gets to the receiver.** Cloudflare Access stops every
+  other request for `mx-in.deverenozcan.com` at the edge (a service token,
+  which never expires); the receiver checks its own shared secret behind
+  that.
+
+## Setting up the way in
+
+All of it is `cloudflare/`, a Terraform configuration of its own, so the VM's
+state and the Proxmox password stay out of it. Nothing there changes where
+mail goes until you say so: the tunnel, Access and the Worker come first,
+then one test address, then everything.
+
+### The API token
+
+Cloudflare dashboard → My Profile → API Tokens → Create Token → Custom token.
+Account resources: your account; zone resources: `deverenozcan.com`.
+
+| Scope | Permission | For |
+|---|---|---|
+| Account | Cloudflare Tunnel: Edit | the tunnel and its routes |
+| Account | Access: Apps and Policies: Edit | the Access application and policy |
+| Account | Access: Service Tokens: Edit | the Worker's service token |
+| Account | Workers Scripts: Edit | the Worker |
+| Account | Email Routing Addresses: Read | checking the fallback address is verified |
+| Zone | Zone: Read | finding the zone and the account |
+| Zone | DNS: Edit | the `mx-in` record |
+| Zone | Email Routing Rules: Edit | the test rule and the catch-all |
+
+Put it, with the fallback address, into `cloudflare/secret.tfvars`
+(git-ignored; start from `secret.tfvars.example`). The fallback address has
+to be a verified destination in Email Routing - the one today's rules forward
+to will do.
+
+If the account has never used Zero Trust, the dashboard asks once for a team
+name and a plan (Free, up to 50 users) before Access and tunnels can be
+created.
+
+### The tunnel, Access and the Worker
+
+From `cloudflare/`:
+
+```bash
+terraform init
+```
+
+```bash
+terraform plan -var-file=secret.tfvars
+```
+
+```bash
+terraform apply -var-file=secret.tfvars
+```
+
+Then hand cloudflared its token and start it, from this directory:
+
+```bash
+sed -i "s|^MAIL_CLOUDFLARED_TOKEN=.*|MAIL_CLOUDFLARED_TOKEN=$(terraform -chdir=cloudflare output -raw tunnel_token)|" .env
+```
+
+```bash
+ansible-playbook site.yml --tags receiver,cloudflared
+```
+
+`systemctl status cloudflared-tunnel` on the server shows it connected.
+
+### One address first
+
+With a mailbox in place ([Using it](#using-it)), send one address of the
+domain to the server while every other address keeps going where it went:
+
+```bash
+terraform -chdir=cloudflare apply -var-file=secret.tfvars -var test_address=jane.doe@deverenozcan.com
+```
+
+Write to it from an outside mailbox (Gmail): it lands in the mailbox. The
+Worker's log (dashboard → Workers → mail-inbound → Logs) shows every
+message that went to the fallback address instead, and why.
+
+### Switching mail over
+
+Look at today's routing rules first (dashboard → Email → Email Routing →
+Routing rules): an address with a rule of its own keeps that rule - remove
+the ones that should reach the server now. Then:
+
+```bash
+terraform -chdir=cloudflare apply -var-file=secret.tfvars -var route_all_mail=true
+```
+
+The catch-all now hands every address to the Worker. Keep passing
+`route_all_mail=true` on later runs, or set it in `secret.tfvars`: a run
+without it removes the catch-all rule Terraform made.
+
+**Going back**, if the server cannot take the domain's mail: in the
+dashboard, set the catch-all to "Send to an email" with the fallback address.
 
 ## How it is put together
 
@@ -91,8 +188,9 @@ VM 130: receiver 127.0.0.1:8025 ─▶ Postfix 127.0.0.1:25 ─▶ rspamd
   Postfix from 127.0.0.1, which rspamd recognises by itself; Cloudflare
   checked SPF when it took the message.
 - **TLS**: Ubuntu's self-signed certificate for now, so mail clients warn
-  once. A real certificate for `mail.deverenozcan.com` comes with the
-  Cloudflare side (Let's Encrypt, DNS-01).
+  once. A real certificate for `mail.deverenozcan.com` comes with webmail
+  (Let's Encrypt, DNS-01). Mail from the internet does not need it: TLS ends
+  at Cloudflare, and the tunnel carries it from there.
 
 ## Sending
 
@@ -132,7 +230,10 @@ In `.env` here (git-ignored; start from `.env.example`):
 |---|---|
 | `MAIL_LDAP_PASSWORD` | the password of `svc-mail`. The same value is `SAMBA_SVC_MAIL_PASSWORD` in `../samba_ad/.env`, which creates the account |
 | `MAIL_RECEIVER_SECRET` | shared with the Email Worker; the receiver refuses mail without it |
-| `MAIL_CLOUDFLARED_TOKEN` | the tunnel's token; empty until the tunnel exists, and cloudflared stays off until then |
+| `MAIL_CLOUDFLARED_TOKEN` | the tunnel's token (`terraform -chdir=cloudflare output -raw tunnel_token`); empty until the tunnel exists, and cloudflared stays off until then |
+
+And in `cloudflare/secret.tfvars`: the Cloudflare API token and the fallback
+address. The Worker's copy of the receiver's secret is read from `.env` here.
 
 ## Building it from nothing
 
