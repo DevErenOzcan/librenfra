@@ -86,17 +86,6 @@
     state: present
     install_recommends: false
 
-- name: mail_base | Is there a Let's Encrypt certificate
-  ansible.builtin.stat:
-    path: "{{ mail_letsencrypt_dir }}/fullchain.pem"
-  register: mail_base_letsencrypt
-
-- name: mail_base | Use it
-  ansible.builtin.set_fact:
-    mail_tls_cert_file: "{{ mail_letsencrypt_dir }}/fullchain.pem"
-    mail_tls_key_file: "{{ mail_letsencrypt_dir }}/privkey.pem"
-  when: mail_base_letsencrypt.stat.exists
-
 - name: mail_base | Dry-run note
   ansible.builtin.debug:
     msg: >-

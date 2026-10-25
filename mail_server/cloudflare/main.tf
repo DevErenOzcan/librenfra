@@ -13,8 +13,9 @@
 # Roundcube on 127.0.0.1:8080. Cloudflare's own certificate covers it here;
 # Let's Encrypt validates the server's certificate through it as well.
 #
-# Nothing here touches where mail goes until route_all_mail is true (or
-# test_address is set): Email Routing keeps doing what it did before.
+# Every address of the domain goes to the mail server (route_all_mail);
+# test_address and route_all_mail = false are for setting it up step by step
+# (README.md, "Setting up the way in").
 
 locals {
   domain = "deverenozcan.com"
@@ -226,6 +227,32 @@ resource "cloudflare_email_routing_rule" "test" {
     {
       type  = "worker"
       value = [cloudflare_workers_script.inbound.script_name]
+    },
+  ]
+}
+
+# Addresses that keep going to the fallback mailbox instead of the server
+# (var.forward_to_fallback). eren.ozcan@ is the owner's address from before
+# the server, forwarded to their own mailbox since 2026-03 - adopted here by
+# imports.tf.
+resource "cloudflare_email_routing_rule" "forward" {
+  for_each = toset(var.forward_to_fallback)
+
+  zone_id  = local.zone_id
+  name     = "${each.value} to the fallback address (librenfra)"
+  enabled  = true
+  priority = 0
+  matchers = [
+    {
+      type  = "literal"
+      field = "to"
+      value = each.value
+    },
+  ]
+  actions = [
+    {
+      type  = "forward"
+      value = [var.fallback_address]
     },
   ]
 }

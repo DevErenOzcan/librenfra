@@ -17,12 +17,13 @@ in with their address and their AD password.
 | `.env` | the secrets (git-ignored; `.env.example` shows the format) |
 | `ansible.cfg`, `requirements.yml` | Ansible settings and the collections the roles need |
 
-**Status (2026-10-25):** the server, the Cloudflare side and webmail run.
-Mail from the internet reaches the server only for the test address
-(`postmaster@`); the domain's other addresses still go where Email Routing
-sent them before ([Switching mail over](#switching-mail-over)). Sending to the
-internet is not set up ([Sending](#sending)). The one mailbox is
-`eren.ozcan@deverenozcan.com`, which also gets `postmaster@` and `abuse@`.
+**Status (2026-10-25):** the server, the Cloudflare side and webmail run,
+and every address of the domain comes to the server: Email Routing's
+catch-all hands it all to the Worker ([Switching mail over](#switching-mail-over)).
+Sending to the internet is not set up ([Sending](#sending)). The one mailbox is
+`admin@deverenozcan.com` (the AD account `eren.ozcan`), which also gets
+`postmaster@` and `abuse@`; `eren.ozcan@deverenozcan.com` is not a mailbox
+here - Cloudflare forwards it to its owner's own mailbox.
 
 ## How mail gets in
 
@@ -138,20 +139,20 @@ message that went to the fallback address instead, and why.
 
 ### Switching mail over
 
-Look at today's routing rules first (dashboard → Email → Email Routing →
-Routing rules): an address with a rule of its own keeps that rule - remove
-the ones that should reach the server now. Then:
+Done on 2026-10-25. `route_all_mail` is true by default since then, so every
+run keeps the catch-all on the Worker; `-var route_all_mail=false` removes it.
 
-```bash
-terraform -chdir=cloudflare apply -var-file=secret.tfvars -var route_all_mail=true
-```
-
-The catch-all now hands every address to the Worker. Keep passing
-`route_all_mail=true` on later runs, or set it in `secret.tfvars`: a run
-without it removes the catch-all rule Terraform made.
+An address with a rule of its own keeps that rule and never reaches the
+server. `forward_to_fallback` (`cloudflare/variables.tf`) lists the ones
+forwarded straight to the fallback address: `eren.ozcan@`, the owner's
+address from before the server, adopted by `cloudflare/imports.tf`. Mail
+written to it from inside - from webmail - is refused: on the server it is
+not a mailbox, and the server cannot send anything out yet.
 
 **Going back**, if the server cannot take the domain's mail: in the
-dashboard, set the catch-all to "Send to an email" with the fallback address.
+dashboard set the catch-all to "Send to an email" with the fallback address.
+Mail the server cannot take meanwhile already goes to the fallback address
+by itself (the Worker).
 
 ## Webmail
 
@@ -312,6 +313,11 @@ sudo samba-tool group addmembers "Mail Users" jane.doe
 An existing user gets an address with `sudo samba-tool user edit jane.doe`
 (the `mail:` line). The mailbox appears with the first message.
 
+**Changing someone's address** changes their sign-in too (it is `mail`), and
+the mailbox follows the address: move the directory, or they start empty -
+on the mail server, `sudo mv /var/vmail/deverenozcan.com/OLD /var/vmail/deverenozcan.com/NEW`.
+Roundcube keeps settings per address, so they start from its defaults.
+
 **Webmail**: `https://mail.deverenozcan.com`, from anywhere.
 
 **Mail clients**, from the LAN: IMAP `mail.deverenozcan.com:993` (TLS),
@@ -364,6 +370,10 @@ curl -H "X-Receiver-Secret: $SECRET" -H "X-Envelope-From: someone%40example.org"
   goes through libldap, which ignores Dovecot's own `ssl_client_ca_file`;
   with only that set, Dovecot "Can't connect" to the DC while Postfix can.
   `mail_base` writes the AD CA there.
+- **The certificate is chosen for every run.** `site.yml` picks Let's
+  Encrypt's in its pre_tasks, so `--tags postfix` and the like keep it - a run
+  of one role once put Postfix back on the self-signed one for a few minutes
+  (2026-10-25).
 - **Changing a password in webmail is a change, not a reset.** Roundcube's
   `ldap_samba_ad` driver replaces `unicodePwd`, which AD allows only an
   administrator ("Insufficient access" for users). `roles/webmail` ships its

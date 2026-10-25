@@ -41,6 +41,23 @@
         mail_base_installed: "{{ mail_base_dovecot.stat.exists }}"
         mail_base_webmail_installed: "{{ mail_base_roundcube.stat.exists }}"
       tags: [always]
+
+    # Which certificate Postfix, Dovecot and nginx present: Let's Encrypt's
+    # once roles/certificate has it. Here, for every --tags: a run of one
+    # role must not fall back to the self-signed one (--tags postfix did,
+    # 2026-10-25).
+    - name: Is there a Let's Encrypt certificate
+      ansible.builtin.stat:
+        path: "/etc/letsencrypt/live/{{ mail_fqdn }}/fullchain.pem"
+      register: mail_base_letsencrypt
+      tags: [always]
+
+    - name: Use it
+      ansible.builtin.set_fact:
+        mail_tls_cert_file: "/etc/letsencrypt/live/{{ mail_fqdn }}/fullchain.pem"
+        mail_tls_key_file: "/etc/letsencrypt/live/{{ mail_fqdn }}/privkey.pem"
+      when: mail_base_letsencrypt.stat.exists
+      tags: [always]
   roles:
     - role: serial_console
       tags: [console]

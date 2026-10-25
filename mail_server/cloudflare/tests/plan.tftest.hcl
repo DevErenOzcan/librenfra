@@ -11,18 +11,29 @@ mock_provider "cloudflare" {
   }
 }
 
+# imports.tf adopts an existing rule; a mock provider cannot import, so the
+# test stands in for it.
+override_resource {
+  target = cloudflare_email_routing_rule.forward["eren.ozcan@deverenozcan.com"]
+}
+
 variables {
   cloudflare_api_token = "not-used-by-the-mock"
   fallback_address     = "fallback@example.com"
 }
 
-# By default nothing changes where mail goes.
-run "leaves_email_routing_alone_by_default" {
+# With route_all_mail = false (and no test_address) the server gets no mail:
+# no catch-all, no test rule.
+run "leaves_email_routing_alone_when_asked" {
   command = plan
+
+  variables {
+    route_all_mail = false
+  }
 
   assert {
     condition     = length(cloudflare_email_routing_rule.test) == 0 && length(cloudflare_email_routing_catch_all.all) == 0
-    error_message = "Without test_address or route_all_mail, Email Routing must not be touched."
+    error_message = "With route_all_mail false and no test_address, nothing may route to the server."
   }
 
   assert {
@@ -70,7 +81,8 @@ run "routes_one_address_for_testing" {
   command = plan
 
   variables {
-    test_address = "test@deverenozcan.com"
+    route_all_mail = false
+    test_address   = "test@deverenozcan.com"
   }
 
   assert {
@@ -85,11 +97,19 @@ run "routes_one_address_for_testing" {
   }
 }
 
-run "routes_every_address_when_switched_over" {
+# The default since the switch-over: every address to the server, except
+# the ones forwarded straight to the fallback mailbox.
+run "routes_every_address_by_default" {
   command = plan
 
-  variables {
-    route_all_mail = true
+  assert {
+    condition = (
+      cloudflare_email_routing_rule.forward["eren.ozcan@deverenozcan.com"].enabled &&
+      cloudflare_email_routing_rule.forward["eren.ozcan@deverenozcan.com"].matchers[0].value == "eren.ozcan@deverenozcan.com" &&
+      cloudflare_email_routing_rule.forward["eren.ozcan@deverenozcan.com"].actions[0].type == "forward" &&
+      cloudflare_email_routing_rule.forward["eren.ozcan@deverenozcan.com"].actions[0].value[0] == "fallback@example.com"
+    )
+    error_message = "eren.ozcan@ must keep being forwarded to the fallback address."
   }
 
   assert {

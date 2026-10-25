@@ -28,9 +28,20 @@ variable "test_address" {
 variable "route_all_mail" {
   description = <<-EOT
     true: Email Routing's catch-all hands every address of the domain to the
-    mail server (README.md, "Switching mail over"). false: the catch-all is
-    left as it is.
+    mail server - the way it runs since 2026-10-25 (README.md, "Switching
+    mail over"). false: Terraform removes its catch-all rule; only for
+    setting things up again from nothing, or going back.
   EOT
   type        = bool
-  default     = false
+  default     = true
+}
+
+variable "forward_to_fallback" {
+  description = <<-EOT
+    Addresses of the domain that Email Routing forwards straight to the
+    fallback address (the owner's own mailbox elsewhere) and that never reach
+    the mail server. A rule for an address wins over the catch-all.
+  EOT
+  type        = list(string)
+  default     = ["eren.ozcan@deverenozcan.com"]
 }
