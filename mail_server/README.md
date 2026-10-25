@@ -11,18 +11,18 @@ in with their address and their AD password.
 | `site.yml` | the playbook: serial console, packages, the data volume, then each service |
 | `host_vars/mail.yml` | every setting: the domain, the directory, the data volume, which secrets come from `.env` |
 | `inventory.yml` | how the controller reaches it: `ubuntu@10.10.20.10` over SSH |
-| `roles/` | `serial_console`, `mail_base`, `data_volume`, `rspamd`, `dovecot`, `postfix`, `mail_receiver`, `cloudflared` |
+| `roles/` | `serial_console`, `mail_base`, `data_volume`, `rspamd`, `cloudflared`, `webmail`, `certificate`, `dovecot`, `postfix`, `mail_receiver` |
 | `terraform/` | VM 130 and VM 9130, which holds its data disk |
 | `cloudflare/` | the way in on Cloudflare: tunnel, Access, the Email Worker (`worker/`), Email Routing; its own Terraform state |
 | `.env` | the secrets (git-ignored; `.env.example` shows the format) |
 | `ansible.cfg`, `requirements.yml` | Ansible settings and the collections the roles need |
 
-**Status: built on 2026-10-23; the Cloudflare side is written, not set up.**
-The server runs and delivers mail inside the domain; mail from the internet
-arrives once `cloudflare/` is applied ([Setting up the way in](#setting-up-the-way-in)),
-and sending to the internet is not set up ([Sending](#sending)). No mailbox
-exists yet - not even `mail_admin_address`'s, so mail to `postmaster@`
-bounces until it does.
+**Status (2026-10-25):** the server, the Cloudflare side and webmail run.
+Mail from the internet reaches the server only for the test address
+(`postmaster@`); the domain's other addresses still go where Email Routing
+sent them before ([Switching mail over](#switching-mail-over)). Sending to the
+internet is not set up ([Sending](#sending)). The one mailbox is
+`eren.ozcan@deverenozcan.com`, which also gets `postmaster@` and `abuse@`.
 
 ## How mail gets in
 
@@ -153,6 +153,30 @@ without it removes the catch-all rule Terraform made.
 **Going back**, if the server cannot take the domain's mail: in the
 dashboard, set the catch-all to "Send to an email" with the fallback address.
 
+## Webmail
+
+`https://mail.deverenozcan.com` is Roundcube, in Turkish, from anywhere -
+the same tunnel carries it (`cloudflare/main.tf`). People sign in with the
+part of their address before the @ and their AD password, and can change the
+password themselves (Settings → Password).
+
+```
+anywhere ─▶ https://mail.deverenozcan.com ─ Cloudflare (its certificate) ─ tunnel ─▶ nginx 127.0.0.1:8080
+LAN      ─▶ https://mail.deverenozcan.com ─ the firewall answers 10.10.20.10 ─────▶ nginx :443 (Let's Encrypt)
+                                     nginx ─▶ php-fpm ─▶ Roundcube ─▶ Dovecot :993, Postfix :587
+```
+
+- **The sign-in faces the internet**, as on any webmail - not behind Cloudflare
+  Access. Roundcube allows 3 failed tries a minute, and AD locks an account
+  for 15 minutes after 10 wrong passwords (`../samba_ad`, password policy).
+- **The server's certificate** is Let's Encrypt's, for `mail.deverenozcan.com`:
+  what IMAP, submission and webmail from the LAN present (`roles/certificate`).
+  Let's Encrypt checks the name over HTTP, which public DNS sends through the
+  tunnel to nginx - so no DNS token lives on the server, and `certbot.timer`
+  renews it the same way, reloading Postfix, Dovecot and nginx.
+- **Roundcube's database** - settings, address books - is an SQLite file on
+  the data disk.
+
 ## How it is put together
 
 - **The VM.** Ubuntu's 26.04 cloud image, 2 vCPU, 3 GB, a 20 GB OS disk;
@@ -187,10 +211,10 @@ dashboard, set the catch-all to "Send to an email" with the fallback address.
   the connecting client (SPF, HELO) do not apply - every message reaches
   Postfix from 127.0.0.1, which rspamd recognises by itself; Cloudflare
   checked SPF when it took the message.
-- **TLS**: Ubuntu's self-signed certificate for now, so mail clients warn
-  once. A real certificate for `mail.deverenozcan.com` comes with webmail
-  (Let's Encrypt, DNS-01). Mail from the internet does not need it: TLS ends
-  at Cloudflare, and the tunnel carries it from there.
+- **TLS**: Let's Encrypt's certificate for `mail.deverenozcan.com`
+  ([Webmail](#webmail)); Ubuntu's self-signed one only until it exists. Mail
+  from the internet does not need it: TLS ends at Cloudflare, and the tunnel
+  carries it from there.
 
 ## Sending
 
@@ -212,8 +236,8 @@ ansible-playbook site.yml --check --diff
 ansible-playbook site.yml
 ```
 
-`--tags console|base|data|rspamd|dovecot|postfix|receiver|cloudflared` runs
-one part. Terraform, from `terraform/`:
+`--tags console|base|data|rspamd|cloudflared|webmail|certificate|dovecot|postfix|receiver`
+runs one part. Terraform, from `terraform/`:
 
 ```bash
 terraform plan -var-file=secret.tfvars
@@ -230,6 +254,7 @@ In `.env` here (git-ignored; start from `.env.example`):
 |---|---|
 | `MAIL_LDAP_PASSWORD` | the password of `svc-mail`. The same value is `SAMBA_SVC_MAIL_PASSWORD` in `../samba_ad/.env`, which creates the account |
 | `MAIL_RECEIVER_SECRET` | shared with the Email Worker; the receiver refuses mail without it |
+| `MAIL_ROUNDCUBE_DES_KEY` | Roundcube's key for what it keeps encrypted in sessions, 24 characters (`openssl rand -hex 12`) |
 | `MAIL_CLOUDFLARED_TOKEN` | the tunnel's token (`terraform -chdir=cloudflare output -raw tunnel_token`); empty until the tunnel exists, and cloudflared stays off until then |
 
 And in `cloudflare/secret.tfvars`: the Cloudflare API token and the fallback
@@ -287,11 +312,13 @@ sudo samba-tool group addmembers "Mail Users" jane.doe
 An existing user gets an address with `sudo samba-tool user edit jane.doe`
 (the `mail:` line). The mailbox appears with the first message.
 
+**Webmail**: `https://mail.deverenozcan.com`, from anywhere.
+
 **Mail clients**, from the LAN: IMAP `mail.deverenozcan.com:993` (TLS),
 SMTP `mail.deverenozcan.com:587` (STARTTLS), user name the full address. The
 firewall answers that name with `10.10.20.10` inside. From the home network
-and from outside the firewall lets nothing in yet; that comes with Cloudflare
-Zero Trust.
+and from outside, IMAP and SMTP are not reachable yet - webmail is; clients
+would need Cloudflare Zero Trust (WARP).
 
 ## Checking it
 
@@ -316,6 +343,12 @@ curl -H "X-Receiver-Secret: $SECRET" -H "X-Envelope-From: someone%40example.org"
 
 ## Good to know
 
+- **Webmail was checked** (2026-10-25) through Cloudflare with a temporary
+  AD user and its own password policy (both deleted afterwards): sign-in,
+  the inbox, a password change accepted ("Kaydedildi") and the new password
+  taken by Dovecot, one refused by the domain's history, one by Roundcube's
+  minimum length; Let's Encrypt's certificate on 993, 587 and 443, and
+  `certbot renew --dry-run`.
 - **How this was checked** (2026-10-23), before it ran anywhere: the rendered
   configuration in an `ubuntu:26.04` container with the same packages -
   `postfix check`, `doveconf -n`, `rspamadm configtest`, `sievec` - and the
@@ -331,6 +364,22 @@ curl -H "X-Receiver-Secret: $SECRET" -H "X-Envelope-From: someone%40example.org"
   goes through libldap, which ignores Dovecot's own `ssl_client_ca_file`;
   with only that set, Dovecot "Can't connect" to the DC while Postfix can.
   `mail_base` writes the AD CA there.
+- **Changing a password in webmail is a change, not a reset.** Roundcube's
+  `ldap_samba_ad` driver replaces `unicodePwd`, which AD allows only an
+  administrator ("Insufficient access" for users). `roles/webmail` ships its
+  own driver (`files/ldap_samba_ad_change.php`) that removes the old value
+  and adds the new one as the user - AD's change - so the domain's policy
+  applies: a password set by an administrator can be changed the next day
+  (minimum age 1 day), not to one of the last 24, and Samba still accepts the
+  previous one for 60 minutes afterwards (`old password allowed period`).
+- **Roundcube on PHP 8.5.** Ubuntu 26.04's Roundcube 1.6.11 declares
+  `array_first()`, which PHP 8.5 now has itself: every page failed with
+  "Cannot redeclare function". `roles/webmail` applies Roundcube's own fix
+  (its 1.6 branch declares the function only when PHP lacks it) to the
+  packaged file, and does nothing once Ubuntu ships it. PHP 8.5 also logs
+  "Using null as an array offset is deprecated" from Roundcube's database
+  layer into `/var/log/roundcube/errors.log`: noise, not a fault, until the
+  package catches up.
 - **Turkish text and rspamd.** `R_MIXED_CHARSET` weighs 5.0 by default and
   scored "Teşekkürler, Şükrü Işık" 3.75 on its own; it is lowered to 1.0
   (`files/local.d/groups.conf`).

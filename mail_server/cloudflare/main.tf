@@ -9,13 +9,18 @@
 #        (Access: the Worker's service token only) ─▶ Tunnel "mail-inbound"
 #        ─▶ cloudflared on VM 130 ─▶ the receiver, 127.0.0.1:8025
 #
+# The same tunnel carries webmail: https://mail.deverenozcan.com ─▶ nginx and
+# Roundcube on 127.0.0.1:8080. Cloudflare's own certificate covers it here;
+# Let's Encrypt validates the server's certificate through it as well.
+#
 # Nothing here touches where mail goes until route_all_mail is true (or
 # test_address is set): Email Routing keeps doing what it did before.
 
 locals {
   domain = "deverenozcan.com"
-  # The tunnel's public hostname; the receiver is behind it.
+  # The tunnel's public hostnames: the receiver, and webmail.
   inbound_host = "mx-in.${local.domain}"
+  webmail_host = "mail.${local.domain}"
 
   zone_id    = data.cloudflare_zone.domain.zone_id
   account_id = data.cloudflare_zone.domain.account.id
@@ -58,6 +63,13 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "mail" {
           disable_chunked_encoding = true
         }
       },
+      # Webmail, and Let's Encrypt's checks for the server's certificate.
+      # Not behind Access: Roundcube's own login is the door, as on any
+      # webmail (README.md, "Webmail").
+      {
+        hostname = local.webmail_host
+        service  = "http://127.0.0.1:8080"
+      },
       # Anything else the tunnel is asked for.
       {
         service = "http_status:404"
@@ -79,6 +91,18 @@ resource "cloudflare_dns_record" "inbound" {
   proxied = true
   ttl     = 1 # automatic, as for every proxied record
   comment = "Tunnel to the mail server's receiver (librenfra mail_server/cloudflare)"
+}
+
+# Public DNS only: inside, the firewall answers mail.deverenozcan.com with the
+# server's own address, so LAN clients go to it directly.
+resource "cloudflare_dns_record" "webmail" {
+  zone_id = local.zone_id
+  name    = local.webmail_host
+  type    = "CNAME"
+  content = "${cloudflare_zero_trust_tunnel_cloudflared.mail.id}.cfargotunnel.com"
+  proxied = true
+  ttl     = 1
+  comment = "Tunnel to the mail server's webmail (librenfra mail_server/cloudflare)"
 }
 
 # ---------------------------------------------------------------------------

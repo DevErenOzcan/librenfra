@@ -1,0 +1,100 @@
+---
+# Webmail: Roundcube on nginx and php-fpm. The tunnel brings
+# https://mail.<domain> from anywhere to 127.0.0.1:8080; the LAN reaches the
+# same name directly on 443. Roundcube signs in to Dovecot and sends through
+# Postfix's 587 with the user's own address and password.
+
+- name: webmail | The Roundcube key is in .env
+  ansible.builtin.assert:
+    that: mail_roundcube_des_key | length == 24
+    quiet: true
+    fail_msg: >-
+      No MAIL_ROUNDCUBE_DES_KEY (24 characters) in
+      {{ mail_secrets_file | default('.env') }}. Make one with
+      openssl rand -hex 12 (README.md, "Secrets"). Nothing has been changed.
+  no_log: true
+
+# --- Roundcube --------------------------------------------------------------
+# Ubuntu 26.04's Roundcube (1.6.11) declares array_first(), which PHP 8.5 now
+# has itself, so every page fails with "Cannot redeclare function
+# array_first()" (2026-10-25). Roundcube's own fix, on its 1.6 branch,
+# declares it only when PHP does not; this applies the same guard until
+# Ubuntu ships it, and matches nothing once the package has it.
+- name: webmail | Roundcube runs on PHP 8.5 (array_first)
+  ansible.builtin.replace:
+    path: /usr/share/roundcube/program/lib/Roundcube/bootstrap.php
+    regexp: '(?<!\{\n)^(function array_first\(\$array\)\n\{\n(?:.*\n)*?^\}\n)'
+    replace: "if (!function_exists('array_first')) {\n\\1}\n"
+  notify: webmail | Restart php-fpm
+
+- name: webmail | Roundcube's configuration
+  ansible.builtin.template:
+    src: config.inc.php.j2
+    dest: /etc/roundcube/config.inc.php
+    owner: root
+    group: www-data
+    mode: "0640"
+  diff: false
+  no_log: true
+  notify: webmail | Restart php-fpm
+
+# Our own driver for it: a change, as AD allows users, not a reset.
+- name: webmail | The password plugin's driver for AD
+  ansible.builtin.copy:
+    src: ldap_samba_ad_change.php
+    dest: /usr/share/roundcube/plugins/password/drivers/ldap_samba_ad_change.php
+    owner: root
+    group: root
+    mode: "0644"
+  notify: webmail | Restart php-fpm
+
+# Holds svc-mail's password.
+- name: webmail | The password plugin
+  ansible.builtin.template:
+    src: password-config.inc.php.j2
+    dest: /etc/roundcube/plugins/password/config.inc.php
+    owner: root
+    group: www-data
+    mode: "0640"
+  diff: false
+  no_log: true
+  notify: webmail | Restart php-fpm
+
+- name: webmail | PHP takes attachments up to 25 MiB
+  ansible.builtin.template:
+    src: php.ini.j2
+    dest: "/etc/php/{{ webmail_php_version }}/fpm/conf.d/90-roundcube.ini"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: webmail | Restart php-fpm
+
+# The database (settings, address books) is on the data disk
+# (host_vars/mail.yml); www-data's uid is fixed, but the directory may have
+# come back from an older VM.
+- name: webmail | Roundcube's database belongs to the web server
+  ansible.builtin.file:
+    path: /var/lib/dbconfig-common/sqlite3/roundcube
+    state: directory
+    owner: www-data
+    group: www-data
+    mode: "0770"
+    recurse: true
+
+# --- nginx ------------------------------------------------------------------
+- name: webmail | nginx
+  ansible.builtin.include_tasks: nginx.yml
+
+- name: webmail | nginx and php-fpm run and start at boot
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    state: started
+    enabled: true
+  loop:
+    - "php{{ webmail_php_version }}-fpm"
+    - nginx
+
+# Now, not at the end of the play: roles/certificate needs nginx serving the
+# new site - Let's Encrypt got a 502 through the tunnel otherwise (2026-10-25).
+- name: webmail | Apply the new configuration now
+  ansible.builtin.meta: flush_handlers

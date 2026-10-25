@@ -50,3 +50,16 @@ samba_ad_service_accounts:
   - name: svc-mail
     description: "Mailbox lookups for mail.deverenozcan.com (librenfra mail_server); read-only"
     password_key: SAMBA_SVC_MAIL_PASSWORD
+
+# --- Password policy ---------------------------------------------------------------
+# Webmail's sign-in faces the internet (../mail_server), so a password that
+# is guessed at locks the account: 10 wrong tries, then 15 minutes. Passwords
+# do not expire - forced periodic changes make passwords weaker, not stronger
+# (NIST SP 800-63B), and an expired one locks a user out of their mail. The
+# rest of the domain's policy (complexity, length 7, history 24) stays
+# Samba's default. Keys are samba-tool domain passwordsettings options.
+samba_ad_password_settings:
+  account-lockout-threshold: 10
+  account-lockout-duration: 15
+  reset-account-lockout-after: 15
+  max-pwd-age: 0

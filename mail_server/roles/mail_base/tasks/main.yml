@@ -57,12 +57,45 @@
     vtype: select
     value: No configuration
 
+# Roundcube asks where its database goes and which web server to set up: a
+# local SQLite file, and none - roles/webmail configures nginx.
+- name: mail_base | Roundcube installs with SQLite and no web server of its own
+  ansible.builtin.debconf:
+    name: roundcube-core
+    question: "{{ item.question }}"
+    vtype: "{{ item.vtype }}"
+    value: "{{ item.value }}"
+  loop:
+    - { question: roundcube/dbconfig-install, vtype: boolean, value: "true" }
+    - { question: roundcube/database-type, vtype: select, value: sqlite3 }
+    - { question: roundcube/reconfigure-webserver, vtype: multiselect, value: "" }
+    - { question: roundcube/restart-webserver, vtype: boolean, value: "false" }
+  loop_control:
+    label: "{{ item.question }}"
+
 - name: mail_base | Packages
   ansible.builtin.apt:
     name: "{{ mail_base_packages }}"
     state: present
     update_cache: true
     cache_valid_time: 3600
+
+- name: mail_base | Webmail packages, without Apache
+  ansible.builtin.apt:
+    name: "{{ mail_base_webmail_packages }}"
+    state: present
+    install_recommends: false
+
+- name: mail_base | Is there a Let's Encrypt certificate
+  ansible.builtin.stat:
+    path: "{{ mail_letsencrypt_dir }}/fullchain.pem"
+  register: mail_base_letsencrypt
+
+- name: mail_base | Use it
+  ansible.builtin.set_fact:
+    mail_tls_cert_file: "{{ mail_letsencrypt_dir }}/fullchain.pem"
+    mail_tls_key_file: "{{ mail_letsencrypt_dir }}/privkey.pem"
+  when: mail_base_letsencrypt.stat.exists
 
 - name: mail_base | Dry-run note
   ansible.builtin.debug:

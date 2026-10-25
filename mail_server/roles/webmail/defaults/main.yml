@@ -1,0 +1,30 @@
+---
+# Values live in host_vars/mail.yml; these are the defaults and what follows
+# from them.
+
+mail_hostname: mail
+mail_domain: example.org
+mail_fqdn: "{{ mail_hostname }}.{{ mail_domain }}"
+
+# Where nginx serves webmail for the tunnel (cloudflared forwards
+# mail.<domain> here - ../cloudflare/main.tf).
+webmail_tunnel_port: 8080
+# Ubuntu 26.04's PHP; its php-fpm socket and conf.d live under this version.
+webmail_php_version: "8.5"
+
+# Roundcube's key for what it keeps encrypted in the session (24 characters,
+# from .env: MAIL_ROUNDCUBE_DES_KEY).
+mail_roundcube_des_key: ""
+webmail_language: tr_TR
+webmail_plugins: [archive, zipdownload, markasjunk, password]
+
+# For the password plugin: users change their AD password over LDAPS
+# (host_vars/mail.yml).
+mail_ad_server: ""
+mail_ad_base: ""
+mail_ad_bind_user: ""
+mail_ldap_password: ""
+
+# Ubuntu's self-signed certificate until roles/certificate has one.
+mail_tls_cert_file: /etc/ssl/certs/ssl-cert-snakeoil.pem
+mail_tls_key_file: /etc/ssl/private/ssl-cert-snakeoil.key

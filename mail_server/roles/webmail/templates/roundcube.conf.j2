@@ -1,0 +1,28 @@
+# {{ ansible_managed }}
+# Roundcube, included by both of the site's servers that serve it.
+
+# Only by its own name: a page under another Host header could be used to
+# collect passwords. (Roundcube checks too, at sign-in.)
+if ($host != "{{ mail_fqdn }}") {
+    return 421;
+}
+
+root /var/lib/roundcube/public_html;
+index index.php;
+# Cloudflare takes mail up to 25 MiB; attachments need the same room.
+client_max_body_size 30m;
+
+location / {
+    try_files $uri $uri/ /index.php$is_args$args;
+}
+
+location ~ \.php$ {
+    include snippets/fastcgi-php.conf;
+    fastcgi_pass unix:/run/php/php{{ webmail_php_version }}-fpm.sock;
+    # Every request arrives over TLS: through Cloudflare, or on 443.
+    fastcgi_param HTTPS on;
+}
+
+location ~ /\. {
+    deny all;
+}

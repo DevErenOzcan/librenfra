@@ -210,6 +210,12 @@ creates the ones missing - never changes or removes one:
 | `Mail Users` | group | who has a mailbox |
 | `svc-mail` | user, password never expires | the mail server's read-only lookups |
 
+The domain's password policy is set there too (`samba_ad_password_settings`):
+an account locks for 15 minutes after 10 wrong passwords - webmail's sign-in
+faces the internet - and passwords do not expire, as current guidance (NIST
+SP 800-63B) advises. `sudo samba-tool domain passwordsettings show` prints
+it; `sudo samba-tool user unlock jane.doe` lifts a lock early.
+
 A service account's password is read from `.env` only when the account is
 created (`SAMBA_SVC_MAIL_PASSWORD`; the mail server has the same value). To
 change it later: `sudo samba-tool user setpassword svc-mail`, then the new

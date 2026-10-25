@@ -1,0 +1,50 @@
+---
+# The site, on its own: roles/certificate runs it again once the server has
+# its Let's Encrypt certificate.
+
+- name: webmail | Directory for Let's Encrypt's checks
+  ansible.builtin.file:
+    path: /var/www/acme
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: webmail | nginx snippets
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/nginx/snippets/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - roundcube.conf
+    - acme-challenge.conf
+  notify: webmail | Reload nginx
+
+- name: webmail | The site
+  ansible.builtin.template:
+    src: mail.conf.j2
+    dest: /etc/nginx/sites-available/mail
+    owner: root
+    group: root
+    mode: "0644"
+  notify: webmail | Reload nginx
+
+- name: webmail | The site is enabled, Ubuntu's default one is not
+  ansible.builtin.file:
+    path: "/etc/nginx/sites-enabled/{{ item.name }}"
+    state: "{{ item.state }}"
+    src: "{{ item.src | default(omit) }}"
+  loop:
+    - { name: mail, state: link, src: /etc/nginx/sites-available/mail }
+    - { name: default, state: absent }
+  loop_control:
+    label: "{{ item.name }}"
+  notify: webmail | Reload nginx
+
+# A broken file would take webmail down at the reload.
+- name: webmail | nginx accepts its configuration
+  ansible.builtin.command: nginx -t
+  changed_when: false
+  check_mode: false

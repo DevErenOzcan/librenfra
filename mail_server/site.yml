@@ -12,8 +12,10 @@
 #   postfix      SMTP: mail from the receiver, submission from users
 #   dovecot      IMAP, delivery into the mailboxes, sign-in against AD
 #   rspamd       the spam filter
+#   cloudflared  the Cloudflare Tunnel: mail in, and webmail from anywhere
+#   webmail      Roundcube on nginx
+#   certificate  Let's Encrypt's certificate for mail.<domain>
 #   receiver     what takes mail from Cloudflare's Email Worker
-#   cloudflared  the Cloudflare Tunnel the Worker reaches the receiver through
 #
 # Settings: host_vars/mail.yml
 - name: Mail server
@@ -28,9 +30,16 @@
       register: mail_base_dovecot
       tags: [always]
 
-    - name: Remember it for the roles below
+    - name: Is Roundcube installed
+      ansible.builtin.stat:
+        path: /etc/roundcube/config.inc.php
+      register: mail_base_roundcube
+      tags: [always]
+
+    - name: Remember both for the roles below
       ansible.builtin.set_fact:
         mail_base_installed: "{{ mail_base_dovecot.stat.exists }}"
+        mail_base_webmail_installed: "{{ mail_base_roundcube.stat.exists }}"
       tags: [always]
   roles:
     - role: serial_console
@@ -45,6 +54,17 @@
     - role: rspamd
       tags: [rspamd]
       when: mail_base_installed or not ansible_check_mode
+    # Before webmail and the certificate: Let's Encrypt reaches nginx through
+    # the tunnel.
+    - role: cloudflared
+      tags: [cloudflared]
+    - role: webmail
+      tags: [webmail]
+      when: mail_base_webmail_installed or not ansible_check_mode
+    # Before Dovecot and Postfix, which then use it.
+    - role: certificate
+      tags: [certificate]
+      when: mail_base_webmail_installed or not ansible_check_mode
     - role: dovecot
       tags: [dovecot]
       when: mail_base_installed or not ansible_check_mode
@@ -54,5 +74,3 @@
     - role: mail_receiver
       tags: [receiver]
       when: mail_base_installed or not ansible_check_mode
-    - role: cloudflared
-      tags: [cloudflared]

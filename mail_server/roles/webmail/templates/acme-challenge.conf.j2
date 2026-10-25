@@ -1,0 +1,6 @@
+# {{ ansible_managed }}
+# Let's Encrypt's checks for the server's certificate (roles/certificate).
+location ^~ /.well-known/acme-challenge/ {
+    root /var/www/acme;
+    default_type text/plain;
+}

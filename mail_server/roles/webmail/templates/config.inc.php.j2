@@ -1,0 +1,36 @@
+<?php
+// {{ ansible_managed }}
+//
+// Roundcube for {{ mail_domain }}: librenfra mail_server/roles/webmail.
+// Everything not set here is Roundcube's default (defaults.inc.php here).
+$config = [];
+include("/etc/roundcube/debian-db-roundcube.php");
+
+// Dovecot and Postfix on this server, by the name on their certificate.
+$config['imap_host'] = 'ssl://{{ mail_fqdn }}:993';
+$config['smtp_host'] = 'tls://{{ mail_fqdn }}:587';
+$config['smtp_user'] = '%u';
+$config['smtp_pass'] = '%p';
+{% if not mail_tls_cert_file.startswith('/etc/letsencrypt/') %}
+// Only until there is a Let's Encrypt certificate: the self-signed one
+// cannot be checked.
+$config['imap_conn_options'] = ['ssl' => ['verify_peer' => false, 'verify_peer_name' => false]];
+$config['smtp_conn_options'] = ['ssl' => ['verify_peer' => false, 'verify_peer_name' => false]];
+{% endif %}
+
+// People sign in with the part before the @; the domain is added.
+$config['username_domain'] = '{{ mail_domain }}';
+$config['username_domain_forced'] = true;
+// Answer only to our own name, whatever Host header a request carries.
+$config['trusted_host_patterns'] = ['{{ mail_fqdn | regex_escape }}'];
+
+$config['product_name'] = '{{ mail_domain }}';
+$config['support_url'] = '';
+$config['des_key'] = '{{ mail_roundcube_des_key }}';
+$config['language'] = '{{ webmail_language }}';
+$config['skin'] = 'elastic';
+$config['enable_spellcheck'] = false;
+// Successful and failed sign-ins, with the visitor's address
+// (/var/log/roundcube/userlogins.log).
+$config['log_logins'] = true;
+$config['plugins'] = {{ webmail_plugins | to_json }};

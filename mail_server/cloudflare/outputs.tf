@@ -8,3 +8,8 @@ output "receiver_url" {
   description = "Where the Worker sends each message"
   value       = "https://${local.inbound_host}/inbound"
 }
+
+output "webmail_url" {
+  description = "Webmail, from anywhere"
+  value       = "https://${local.webmail_host}"
+}

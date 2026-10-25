@@ -16,3 +16,18 @@ samba_ad_groups: []
 samba_ad_service_accounts: []
 
 samba_ad_secrets_file: "{{ playbook_dir }}/.env"
+
+# The domain's password policy, as samba-tool domain passwordsettings set
+# options without the dashes in front: { option: value }. Only what is listed
+# is changed.
+samba_ad_password_settings: {}
+# Which line of "samba-tool domain passwordsettings show" each option is read
+# back from.
+samba_ad_password_settings_labels:
+  account-lockout-threshold: "Account lockout threshold (attempts)"
+  account-lockout-duration: "Account lockout duration (mins)"
+  reset-account-lockout-after: "Reset account lockout after (mins)"
+  max-pwd-age: "Maximum password age (days)"
+  min-pwd-age: "Minimum password age (days)"
+  min-pwd-length: "Minimum password length"
+  history-length: "Password history length"

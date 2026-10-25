@@ -28,11 +28,14 @@
 
     # Nothing may keep files open under the old place while it is copied and
     # then covered, so the units that use it are stopped first.
+    # Not in a dry run: it stops nothing, and the units may not be installed
+    # yet.
     - name: "data_volume | Stop what uses {{ bind.path }}"
       ansible.builtin.systemd_service:
         name: "{{ item }}"
         state: stopped
       loop: "{{ bind.stop | default([]) }}"
+      when: not ansible_check_mode
 
     - name: "data_volume | Copy {{ bind.path }} onto the volume (first time only)"
       ansible.builtin.command: >-
@@ -56,3 +59,4 @@
         name: "{{ item }}"
         state: started
       loop: "{{ bind.start | default(bind.stop | default([])) }}"
+      when: not ansible_check_mode

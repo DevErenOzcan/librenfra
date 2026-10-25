@@ -33,6 +33,10 @@ mail_cloudflared_token: >-
   {{ lookup('ansible.builtin.ini', 'MAIL_CLOUDFLARED_TOKEN', type='properties',
             file=mail_secrets_file, interpolation=false, default='')
      if mail_secrets_file is file else '' }}
+mail_roundcube_des_key: >-
+  {{ lookup('ansible.builtin.ini', 'MAIL_ROUNDCUBE_DES_KEY', type='properties',
+            file=mail_secrets_file, interpolation=false, default='')
+     if mail_secrets_file is file else '' }}
 
 # --- The directory -------------------------------------------------------------
 # Mailboxes are the Active Directory users (../samba_ad) whose "mail"
@@ -88,8 +92,8 @@ mail_ad_ca_cert: |
 # --- Data volume ---------------------------------------------------------------
 # VM 9130's 40 GB disk (terraform/main.tf), mounted at /mnt/data. The
 # mailboxes live on it, with rspamd's and Redis's state (what the spam
-# filter has learnt). The services that use a directory are stopped while it
-# is moved onto the volume.
+# filter has learnt) and Roundcube's database. The services that use a
+# directory are stopped while it is moved onto the volume.
 data_volume_label: mail-data
 data_volume_binds:
   - name: vmail
@@ -101,3 +105,7 @@ data_volume_binds:
   - name: redis
     path: /var/lib/redis
     stop: [rspamd.service, redis-server.service]
+  # Roundcube's settings and address books (an SQLite file).
+  - name: roundcube
+    path: /var/lib/dbconfig-common/sqlite3/roundcube
+    stop: [php8.5-fpm.service]

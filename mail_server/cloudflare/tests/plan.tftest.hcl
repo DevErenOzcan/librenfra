@@ -29,9 +29,16 @@ run "leaves_email_routing_alone_by_default" {
     condition = (
       cloudflare_zero_trust_tunnel_cloudflared_config.mail.config.ingress[0].hostname == "mx-in.deverenozcan.com" &&
       cloudflare_zero_trust_tunnel_cloudflared_config.mail.config.ingress[0].service == "http://127.0.0.1:8025" &&
-      cloudflare_zero_trust_tunnel_cloudflared_config.mail.config.ingress[1].service == "http_status:404"
+      cloudflare_zero_trust_tunnel_cloudflared_config.mail.config.ingress[1].hostname == "mail.deverenozcan.com" &&
+      cloudflare_zero_trust_tunnel_cloudflared_config.mail.config.ingress[1].service == "http://127.0.0.1:8080" &&
+      cloudflare_zero_trust_tunnel_cloudflared_config.mail.config.ingress[2].service == "http_status:404"
     )
-    error_message = "The tunnel must send mx-in to the receiver on 127.0.0.1:8025, and nothing else anywhere."
+    error_message = "The tunnel must send mx-in to the receiver on 127.0.0.1:8025, mail to webmail on 127.0.0.1:8080, and nothing else anywhere."
+  }
+
+  assert {
+    condition     = cloudflare_dns_record.webmail.type == "CNAME" && cloudflare_dns_record.webmail.proxied && cloudflare_dns_record.webmail.name == "mail.deverenozcan.com"
+    error_message = "mail must be a proxied CNAME to the tunnel."
   }
 
   assert {

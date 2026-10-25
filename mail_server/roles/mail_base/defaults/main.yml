@@ -33,6 +33,22 @@ mail_base_packages:
   - swaks
   - ldap-utils
 
+# Webmail (roles/webmail) and the certificate (roles/certificate), installed
+# without recommends: Roundcube would pull in Apache.
+mail_base_webmail_packages:
+  - nginx
+  - php-fpm
+  - php-ldap
+  - php-zip
+  - roundcube-core
+  - roundcube-sqlite3
+  - roundcube-plugins
+  - certbot
+
+# The certificate Postfix, Dovecot and nginx present: Let's Encrypt's once
+# roles/certificate has it, Ubuntu's self-signed one until then.
+mail_letsencrypt_dir: "/etc/letsencrypt/live/{{ mail_fqdn }}"
+
 # The owner of every mailbox. The uid and gid are fixed because the mailboxes
 # outlive the VM on the data disk: a rebuilt VM must own them under the same
 # numbers.

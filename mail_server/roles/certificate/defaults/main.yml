@@ -1,0 +1,6 @@
+---
+# Values live in host_vars/mail.yml; these are the defaults.
+mail_hostname: mail
+mail_domain: example.org
+mail_fqdn: "{{ mail_hostname }}.{{ mail_domain }}"
+mail_letsencrypt_dir: "/etc/letsencrypt/live/{{ mail_fqdn }}"

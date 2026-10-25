@@ -106,3 +106,42 @@
         label: "{{ item.name }}"
       when: item.name not in samba_ad_accounts_users
       changed_when: true
+
+# --- the password policy ------------------------------------------------------
+- name: samba_ad_accounts | The domain's password policy
+  when:
+    - samba_ad_accounts_tool.stat.exists
+    - samba_ad_password_settings | length > 0
+  block:
+    - name: samba_ad_accounts | Read the password policy
+      ansible.builtin.command: samba-tool domain passwordsettings show
+      register: samba_ad_accounts_pwsettings
+      changed_when: false
+      check_mode: false
+
+    # A setting matches when "show" prints its line with the wanted value,
+    # e.g. "Account lockout threshold (attempts): 10".
+    - name: samba_ad_accounts | Settings that differ
+      ansible.builtin.set_fact:
+        samba_ad_accounts_pw_set: "{{ samba_ad_accounts_pw_set | default([]) + ['--' ~ item.key ~ '=' ~ item.value] }}"
+      loop: "{{ samba_ad_password_settings | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}={{ item.value }}"
+      when: >-
+        (samba_ad_password_settings_labels[item.key] ~ ': ' ~ item.value)
+        not in samba_ad_accounts_pwsettings.stdout_lines
+
+    # samba-tool cannot pretend, so a dry run skips the next task.
+    - name: samba_ad_accounts | What a real run changes
+      ansible.builtin.debug:
+        msg: "samba-tool domain passwordsettings set {{ samba_ad_accounts_pw_set | join(' ') }}"
+      changed_when: true
+      when:
+        - ansible_check_mode
+        - samba_ad_accounts_pw_set | default([]) | length > 0
+
+    - name: samba_ad_accounts | Set what differs
+      ansible.builtin.command:
+        argv: "{{ ['samba-tool', 'domain', 'passwordsettings', 'set'] + samba_ad_accounts_pw_set }}"
+      changed_when: true
+      when: samba_ad_accounts_pw_set | default([]) | length > 0

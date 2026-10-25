@@ -1,0 +1,66 @@
+---
+# A Let's Encrypt certificate for mail.<domain>, for what clients reach
+# directly: IMAP (993), submission (587) and webmail on 443 from the LAN.
+# (Webmail through Cloudflare carries Cloudflare's own certificate.)
+#
+# Let's Encrypt checks http://mail.<domain>/.well-known/acme-challenge/...,
+# which public DNS sends through the tunnel to nginx (roles/webmail) - so no
+# DNS token has to live on this server, and renewal (certbot.timer, twice a
+# day) works the same way. The tunnel and its route have to exist first
+# (../cloudflare, README.md "Webmail").
+
+- name: certificate | Ask Let's Encrypt (when there is no certificate yet)
+  ansible.builtin.command:
+    argv:
+      - certbot
+      - certonly
+      - --webroot
+      - --webroot-path=/var/www/acme
+      - "--domain={{ mail_fqdn }}"
+      - --non-interactive
+      - --agree-tos
+      - --register-unsafely-without-email
+    creates: "{{ mail_letsencrypt_dir }}/fullchain.pem"
+  register: certificate_issued
+
+# certbot cannot pretend, so a dry run skips it; this says so.
+- name: certificate | What a real run asks for
+  ansible.builtin.debug:
+    msg: "Asks Let's Encrypt for a certificate for {{ mail_fqdn }} through the tunnel."
+  changed_when: true
+  when:
+    - ansible_check_mode
+    - not mail_base_letsencrypt.stat.exists | default(false)
+
+# After every renewal: the services read the new files.
+- name: certificate | Renewals reload the services that use it
+  ansible.builtin.copy:
+    dest: /etc/letsencrypt/renewal-hooks/deploy/reload-mail-services
+    content: |
+      #!/bin/sh
+      # Managed by Ansible (librenfra mail_server, role certificate).
+      systemctl reload postfix dovecot nginx
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: certificate | Renewal is scheduled
+  ansible.builtin.systemd_service:
+    name: certbot.timer
+    state: started
+    enabled: true
+
+# A new certificate: everything after this in the play uses it, and the
+# webmail role, which ran before, writes its files again with it.
+- name: certificate | Use the new certificate from here on
+  ansible.builtin.set_fact:
+    mail_tls_cert_file: "{{ mail_letsencrypt_dir }}/fullchain.pem"
+    mail_tls_key_file: "{{ mail_letsencrypt_dir }}/privkey.pem"
+  when: certificate_issued is changed
+
+- name: certificate | Webmail with the new certificate
+  ansible.builtin.include_role:
+    name: webmail
+    apply:
+      tags: [certificate]
+  when: certificate_issued is changed
