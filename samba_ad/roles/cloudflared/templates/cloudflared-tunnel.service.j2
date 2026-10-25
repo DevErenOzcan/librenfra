@@ -1,0 +1,23 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Cloudflare Tunnel: the admin page from the internet
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# The tunnel's routes live in Cloudflare (remotely managed); the token is
+# all it needs here, handed over by systemd as a credential.
+ExecStart=/usr/bin/cloudflared --no-autoupdate tunnel run
+Environment=TUNNEL_TOKEN_FILE=%d/token
+LoadCredential=token:/etc/cloudflared/tunnel-token
+Restart=on-failure
+RestartSec=5s
+DynamicUser=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+
+[Install]
+WantedBy=multi-user.target

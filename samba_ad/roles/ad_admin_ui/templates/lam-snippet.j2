@@ -1,0 +1,27 @@
+# {{ ansible_managed }}
+# LDAP Account Manager under /lam: Ubuntu's /etc/ldap-account-manager/nginx.conf,
+# with this PHP's socket. Included by both servers of the site.
+location = / {
+    return 302 /lam/;
+}
+
+location /lam {
+    index index.html;
+    alias /usr/share/ldap-account-manager;
+    autoindex off;
+    location ~ /lam/tmp/(.|\n)*\.(php|inc)$ {
+        deny all;
+        return 403;
+    }
+    location ~ /lam/(tmp/internal|sess|config|docs/devel|docs/schema|lib|help|locale) {
+        deny all;
+        return 403;
+    }
+    location ~ \.php$ {
+        include snippets/fastcgi-php.conf;
+        fastcgi_pass unix:/run/php/php{{ ad_admin_ui_php_version }}-fpm.sock;
+        fastcgi_param SCRIPT_FILENAME $request_filename;
+        # Every request arrives over TLS: on 443, or through Cloudflare.
+        fastcgi_param HTTPS on;
+    }
+}

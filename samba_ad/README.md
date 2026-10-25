@@ -174,15 +174,22 @@ sudo chronyc clients                                # once members ask for time
 
 ## The admin page
 
-**https://10.10.10.10/** - LDAP Account Manager (LAM), on the DC
-(`roles/ad_admin_ui`): users, groups, passwords, from a browser. Only from
-inside the firewall: the LAN, and the home network, which reaches the LAN
-through WAN rule 11. Nothing of it is published to the internet; DMZ and LAB
-cannot reach it.
+LDAP Account Manager (LAM), on the DC (`roles/ad_admin_ui`): users, groups,
+passwords, from a browser.
+
+- **From the internet: https://account-manager.deverenozcan.com** - through a
+  Cloudflare Tunnel that cloudflared on the DC dials out (`cloudflare/`,
+  `roles/cloudflared`; no port is opened). **A test setup:** no gate in front
+  but LAM's own sign-in, and `Administrator` is exempt from AD's account
+  lockout - its long random password is the only protection. To close it
+  again: `terraform -chdir=cloudflare destroy -var-file=secret.tfvars`.
+- **From inside the firewall: https://10.10.10.10/** - the LAN, and the home
+  network, which reaches the LAN through WAN rule 11. DMZ and LAB cannot
+  reach it.
 
 - **Sign in** as `Administrator`, with its AD password (`SAMBA_ADMIN_PASSWORD`
   in `.env`). LAM can do what AD lets the account do.
-- **The browser warns once:** the page uses Samba's own certificate, issued to
+- **Inside, the browser warns once:** the page uses Samba's own certificate, issued to
   `dc1.ad.deverenozcan.com` by the CA Samba made with the domain. Accept it,
   or import that CA (`sudo cat /var/lib/samba/private/tls/ca.pem` on the DC)
   into the browser.

@@ -110,6 +110,16 @@
       diff: false
 
 # --- nginx ------------------------------------------------------------------
+- name: ad_admin_ui | LAM's location, shared by both servers
+  ansible.builtin.template:
+    src: lam-snippet.j2
+    dest: /etc/nginx/snippets/lam.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: ad_admin_ui | Reload nginx
+  when: ad_admin_ui_lam.stat.exists
+
 - name: ad_admin_ui | The site
   ansible.builtin.template:
     src: lam-site.j2

@@ -25,5 +25,10 @@ ad_admin_ui_lam_password: >-
             file=samba_ad_secrets_file, interpolation=false, default='')
      if samba_ad_secrets_file is file else '' }}
 
+# The name the page has from the internet, and where nginx serves it for the
+# Cloudflare Tunnel (../../cloudflare/main.tf).
+ad_admin_ui_public_host: account-manager.example.org
+ad_admin_ui_tunnel_port: 8081
+
 # Ubuntu 26.04's PHP.
 ad_admin_ui_php_version: "8.5"

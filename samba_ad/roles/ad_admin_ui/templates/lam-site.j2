@@ -1,8 +1,22 @@
 # {{ ansible_managed }}
 #
-# The directory's web admin, LDAP Account Manager, on the DC itself and only
-# for the networks inside the firewall. librenfra samba_ad/roles/ad_admin_ui.
+# The directory's web admin, LDAP Account Manager, on the DC itself.
+# librenfra samba_ad/roles/ad_admin_ui.
 
+# From the internet, through the Cloudflare Tunnel (../../cloudflare):
+# cloudflared forwards https://{{ ad_admin_ui_public_host }} here. Cloudflare
+# has done TLS, and names the visitor in CF-Connecting-IP.
+server {
+    listen 127.0.0.1:{{ ad_admin_ui_tunnel_port }};
+    server_name {{ ad_admin_ui_public_host }};
+    set_real_ip_from 127.0.0.1;
+    real_ip_header CF-Connecting-IP;
+    # Redirect to a path, not to http://...:8081 - the visitor is on https.
+    absolute_redirect off;
+    include snippets/lam.conf;
+}
+
+# From inside the firewall, directly.
 server {
     listen 80 default_server;
     server_name _;
@@ -22,27 +36,5 @@ server {
 {% endfor %}
     deny all;
 
-    location = / {
-        return 302 /lam/;
-    }
-
-    # Ubuntu's /etc/ldap-account-manager/nginx.conf, with this PHP's socket.
-    location /lam {
-        index index.html;
-        alias /usr/share/ldap-account-manager;
-        autoindex off;
-        location ~ /lam/tmp/(.|\n)*\.(php|inc)$ {
-            deny all;
-            return 403;
-        }
-        location ~ /lam/(tmp/internal|sess|config|docs/devel|docs/schema|lib|help|locale) {
-            deny all;
-            return 403;
-        }
-        location ~ \.php$ {
-            include snippets/fastcgi-php.conf;
-            fastcgi_pass unix:/run/php/php{{ ad_admin_ui_php_version }}-fpm.sock;
-            fastcgi_param SCRIPT_FILENAME $request_filename;
-        }
-    }
+    include snippets/lam.conf;
 }

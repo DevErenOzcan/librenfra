@@ -65,10 +65,17 @@ samba_ad_password_settings:
   max-pwd-age: 0
 
 # --- The admin page ----------------------------------------------------------------
-# LDAP Account Manager at https://10.10.10.10/ (roles/ad_admin_ui): users,
-# groups, passwords. Only from inside the firewall - the LAN, and the home
-# network the controller is on, which reaches the LAN through WAN rule 11.
-# Nothing of it is published to the internet.
+# LDAP Account Manager (roles/ad_admin_ui): users, groups, passwords.
+# Inside the firewall at https://10.10.10.10/ - from the LAN, and from the
+# home network the controller is on, which reaches the LAN through WAN rule 11.
+# From the internet at https://account-manager.deverenozcan.com through a
+# Cloudflare Tunnel (cloudflare/, roles/cloudflared) - a test setup, with no
+# gate in front but LAM's own Administrator sign-in.
+ad_admin_ui_public_host: account-manager.deverenozcan.com
+samba_ad_cloudflared_token: >-
+  {{ lookup('ansible.builtin.ini', 'SAMBA_CLOUDFLARED_TOKEN', type='properties',
+            file=playbook_dir ~ '/.env', interpolation=false, default='')
+     if (playbook_dir ~ '/.env') is file else '' }}
 ad_admin_ui_allow:
   - 10.10.10.0/24
   - 192.168.1.0/24

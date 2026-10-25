@@ -12,6 +12,7 @@
 #   samba     the domain, smb.conf, Kerberos, DNS and time
 #   accounts  the groups and service accounts other machines rely on
 #   adminui   the web admin for users and groups (LDAP Account Manager)
+#   cloudflared  the Cloudflare Tunnel that brings it to the internet
 #
 # Settings: host_vars/dc1.yml
 - name: Samba AD domain controller
@@ -42,3 +43,6 @@
     # The web admin (LDAP Account Manager), for the LAN only.
     - role: ad_admin_ui
       tags: [adminui]
+    # The admin page from the internet (cloudflare/).
+    - role: cloudflared
+      tags: [cloudflared]

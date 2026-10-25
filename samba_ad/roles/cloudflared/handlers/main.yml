@@ -1,0 +1,11 @@
+---
+# Only once there is a token: without one cloudflared would only fail and be
+# restarted, over and over. A dry run has not installed the unit to restart.
+- name: cloudflared | Restart the tunnel
+  ansible.builtin.systemd_service:
+    name: cloudflared-tunnel
+    state: restarted
+    daemon_reload: true
+  when:
+    - samba_ad_cloudflared_token | length > 0
+    - not ansible_check_mode
