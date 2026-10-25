@@ -63,3 +63,12 @@ samba_ad_password_settings:
   account-lockout-duration: 15
   reset-account-lockout-after: 15
   max-pwd-age: 0
+
+# --- The admin page ----------------------------------------------------------------
+# LDAP Account Manager at https://10.10.10.10/ (roles/ad_admin_ui): users,
+# groups, passwords. Only from inside the firewall - the LAN, and the home
+# network the controller is on, which reaches the LAN through WAN rule 11.
+# Nothing of it is published to the internet.
+ad_admin_ui_allow:
+  - 10.10.10.0/24
+  - 192.168.1.0/24

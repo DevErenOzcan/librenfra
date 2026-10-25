@@ -20,10 +20,12 @@ in with their address and their AD password.
 **Status (2026-10-25):** the server, the Cloudflare side and webmail run,
 and every address of the domain comes to the server: Email Routing's
 catch-all hands it all to the Worker ([Switching mail over](#switching-mail-over)).
-Sending to the internet is not set up ([Sending](#sending)). The one mailbox is
-`admin@deverenozcan.com` (the AD account `eren.ozcan`), which also gets
-`postmaster@` and `abuse@`; `eren.ozcan@deverenozcan.com` is not a mailbox
-here - Cloudflare forwards it to its owner's own mailbox.
+Sending to the internet is not set up ([Sending](#sending)). There is no
+mailbox yet: the first account was deleted on 2026-10-25, and people are
+added from the DC's admin page (`../samba_ad`, "The admin page").
+`postmaster@` and `abuse@` go to `mail_admin_address` (`admin@`), which
+bounces until that mailbox exists again; `eren.ozcan@deverenozcan.com` is not
+a mailbox here - Cloudflare forwards it to its owner's own mailbox.
 
 ## How mail gets in
 

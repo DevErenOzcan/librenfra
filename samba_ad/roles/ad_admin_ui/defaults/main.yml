@@ -1,0 +1,29 @@
+---
+# Values live in host_vars/dc1.yml; these are the defaults and what follows
+# from them.
+
+# The domain (samba_ad_dc's values).
+samba_ad_dns_domain: example.internal
+samba_ad_hostname: dc1
+samba_ad_fqdn: "{{ samba_ad_hostname }}.{{ samba_ad_dns_domain }}"
+ad_admin_ui_base_dn: "{{ samba_ad_dns_domain.split('.') | map('regex_replace', '^', 'DC=') | join(',') }}"
+
+# Who may open the page at all. The firewall decides first: only the LAN and
+# the home network (WAN rule 11) reach the DC.
+ad_admin_ui_allow: []
+
+# The accounts LAM offers at its sign-in; each signs in with its own AD
+# password and can do what AD allows it.
+ad_admin_ui_admins:
+  - "CN=Administrator,CN=Users,{{ ad_admin_ui_base_dn }}"
+
+# LAM's own configuration password (its settings pages), from .env:
+# SAMBA_LAM_PASSWORD. Not an AD password.
+samba_ad_secrets_file: "{{ playbook_dir }}/.env"
+ad_admin_ui_lam_password: >-
+  {{ lookup('ansible.builtin.ini', 'SAMBA_LAM_PASSWORD', type='properties',
+            file=samba_ad_secrets_file, interpolation=false, default='')
+     if samba_ad_secrets_file is file else '' }}
+
+# Ubuntu 26.04's PHP.
+ad_admin_ui_php_version: "8.5"

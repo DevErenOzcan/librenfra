@@ -1,0 +1,48 @@
+# {{ ansible_managed }}
+#
+# The directory's web admin, LDAP Account Manager, on the DC itself and only
+# for the networks inside the firewall. librenfra samba_ad/roles/ad_admin_ui.
+
+server {
+    listen 80 default_server;
+    server_name _;
+    return 301 https://$host$request_uri;
+}
+
+# Samba's own certificate, issued to {{ samba_ad_fqdn }} by the CA Samba made
+# with the domain: browsers that do not trust that CA warn once.
+server {
+    listen 443 ssl default_server;
+    server_name _;
+    ssl_certificate /var/lib/samba/private/tls/cert.pem;
+    ssl_certificate_key /var/lib/samba/private/tls/key.pem;
+
+{% for net in ad_admin_ui_allow %}
+    allow {{ net }};
+{% endfor %}
+    deny all;
+
+    location = / {
+        return 302 /lam/;
+    }
+
+    # Ubuntu's /etc/ldap-account-manager/nginx.conf, with this PHP's socket.
+    location /lam {
+        index index.html;
+        alias /usr/share/ldap-account-manager;
+        autoindex off;
+        location ~ /lam/tmp/(.|\n)*\.(php|inc)$ {
+            deny all;
+            return 403;
+        }
+        location ~ /lam/(tmp/internal|sess|config|docs/devel|docs/schema|lib|help|locale) {
+            deny all;
+            return 403;
+        }
+        location ~ \.php$ {
+            include snippets/fastcgi-php.conf;
+            fastcgi_pass unix:/run/php/php{{ ad_admin_ui_php_version }}-fpm.sock;
+            fastcgi_param SCRIPT_FILENAME $request_filename;
+        }
+    }
+}

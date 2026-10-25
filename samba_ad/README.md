@@ -172,6 +172,30 @@ sudo samba-tool domain level show                   # 2008 R2
 sudo chronyc clients                                # once members ask for time
 ```
 
+## The admin page
+
+**https://10.10.10.10/** - LDAP Account Manager (LAM), on the DC
+(`roles/ad_admin_ui`): users, groups, passwords, from a browser. Only from
+inside the firewall: the LAN, and the home network, which reaches the LAN
+through WAN rule 11. Nothing of it is published to the internet; DMZ and LAB
+cannot reach it.
+
+- **Sign in** as `Administrator`, with its AD password (`SAMBA_ADMIN_PASSWORD`
+  in `.env`). LAM can do what AD lets the account do.
+- **The browser warns once:** the page uses Samba's own certificate, issued to
+  `dc1.ad.deverenozcan.com` by the CA Samba made with the domain. Accept it,
+  or import that CA (`sudo cat /var/lib/samba/private/tls/ca.pem` on the DC)
+  into the browser.
+- **A person with a mailbox:** Users → New user; on the Windows tab the user
+  name, first and last name and the e-mail address (`name@deverenozcan.com`),
+  and a password; on the groups part, `Mail Users`. Save. The mailbox appears
+  with the first message.
+- **In English:** LAM ships its Turkish translation switched off as
+  unfinished.
+- LAM's own settings pages ask for `SAMBA_LAM_PASSWORD` (`.env`), not an AD
+  password. Changes made there are overwritten by the next run: the settings
+  are written by the role, from Ubuntu's Samba 4 sample.
+
 ## Using it
 
 **Members use the DC as their DNS server.** A machine finds the domain through

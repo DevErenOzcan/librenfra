@@ -1,0 +1,150 @@
+---
+# A web admin for the directory: LDAP Account Manager (LAM), Ubuntu's package,
+# on the DC and only for the networks inside the firewall - nothing of it is
+# published to the internet. People sign in with an AD account from
+# ad_admin_ui_admins; what they can change is what AD lets that account do.
+#
+# LAM's configuration is written here from its own Samba 4 sample profile:
+# changes made on its settings pages are overwritten by the next run.
+
+- name: ad_admin_ui | LAM's configuration password is in .env
+  ansible.builtin.assert:
+    that: ad_admin_ui_lam_password | length >= 12
+    quiet: true
+    fail_msg: >-
+      No SAMBA_LAM_PASSWORD (at least 12 characters) in
+      {{ samba_ad_secrets_file }} (README.md, "The admin page"). Nothing
+      has been changed.
+  no_log: true
+
+# Without recommends: LAM would pull in Apache.
+- name: ad_admin_ui | Packages
+  ansible.builtin.apt:
+    name: [ldap-account-manager, nginx, php-fpm]
+    state: present
+    install_recommends: false
+
+- name: ad_admin_ui | Is LAM installed
+  ansible.builtin.stat:
+    path: /usr/share/ldap-account-manager
+  register: ad_admin_ui_lam
+
+- name: ad_admin_ui | Configure LAM
+  # A dry run on a DC without LAM has nothing to configure yet.
+  when: ad_admin_ui_lam.stat.exists
+  block:
+    # LAM talks to Samba over LDAPS on this host (AD only takes passwords over
+    # TLS); PHP's LDAP checks the certificate against Samba's own CA.
+    - name: ad_admin_ui | LDAP clients here trust Samba's CA
+      ansible.builtin.copy:
+        dest: /etc/ldap/ldap.conf
+        content: |
+          # Managed by Ansible (librenfra samba_ad, role ad_admin_ui).
+          # LAM reaches this DC over LDAPS; Samba's CA signed its certificate.
+          TLS_CACERT /var/lib/samba/private/tls/ca.pem
+        owner: root
+        group: root
+        mode: "0644"
+
+    # LAM's format: "{CRYPT-SHA512}<crypt> <base64 salt>". Computed by PHP's
+    # crypt(), as LAM checks it, with a salt derived from the password so the
+    # result - and the files - stay the same from run to run.
+    - name: ad_admin_ui | Hash the configuration password
+      ansible.builtin.command:
+        argv:
+          - php
+          - -r
+          - '$p = rtrim(fgets(STDIN), "\n"); echo "{CRYPT-SHA512}" . crypt($p, "\$6\$" . $argv[1]) . " " . base64_encode($argv[1]);'
+          - "{{ (ad_admin_ui_lam_password | hash('sha256'))[:16] }}"
+        stdin: "{{ ad_admin_ui_lam_password }}"
+      register: ad_admin_ui_hash
+      changed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: ad_admin_ui | Read LAM's main settings and its Samba 4 sample
+      ansible.builtin.slurp:
+        src: "{{ item }}"
+      loop:
+        - /etc/ldap-account-manager/config.cfg
+        - /var/lib/ldap-account-manager/config/windows_samba4.sample.conf
+      register: ad_admin_ui_files
+
+    - name: ad_admin_ui | LAM's main settings
+      ansible.builtin.copy:
+        dest: /etc/ldap-account-manager/config.cfg
+        content: "{{ ad_admin_ui_files.results[0].content | b64decode | from_json | combine(_settings) | to_nice_json(indent=2) }}\n"
+        owner: www-data
+        group: root
+        mode: "0600"
+      vars:
+        _settings:
+          password: "{{ ad_admin_ui_hash.stdout }}"
+          default: lam
+      diff: false
+
+    # The server profile "lam", from Ubuntu's Samba 4 sample.
+    - name: ad_admin_ui | The profile for this domain
+      ansible.builtin.copy:
+        dest: /var/lib/ldap-account-manager/config/lam.conf
+        content: "{{ ad_admin_ui_files.results[1].content | b64decode | from_json | combine(_profile, recursive=true) | to_nice_json(indent=2) }}\n"
+        owner: www-data
+        group: root
+        mode: "0600"
+      vars:
+        _profile:
+          ServerURL: "ldaps://{{ samba_ad_fqdn }}:636"
+          useTLS: "no"
+          Passwd: "{{ ad_admin_ui_hash.stdout }}"
+          Admins: "{{ ad_admin_ui_admins | join(';') }}"
+          loginMethod: list
+          # Turkish is switched off in LAM (an unfinished translation); en_US is
+          # also the one locale this DC has.
+          defaultLanguage: en_US.utf8
+          timeZone: Europe/Istanbul
+          activeTypes: user,group
+          typeSettings:
+            suffix_user: "CN=Users,{{ ad_admin_ui_base_dn }}"
+            attr_user: "#sAMAccountName;#cn;#mail;#memberOf"
+            suffix_group: "CN=Users,{{ ad_admin_ui_base_dn }}"
+      diff: false
+
+# --- nginx ------------------------------------------------------------------
+- name: ad_admin_ui | The site
+  ansible.builtin.template:
+    src: lam-site.j2
+    dest: /etc/nginx/sites-available/lam
+    owner: root
+    group: root
+    mode: "0644"
+  notify: ad_admin_ui | Reload nginx
+  when: ad_admin_ui_lam.stat.exists
+
+- name: ad_admin_ui | The site is enabled, Ubuntu's default one is not
+  ansible.builtin.file:
+    path: "/etc/nginx/sites-enabled/{{ item.name }}"
+    state: "{{ item.state }}"
+    src: "{{ item.src | default(omit) }}"
+  loop:
+    - { name: lam, state: link, src: /etc/nginx/sites-available/lam }
+    - { name: default, state: absent }
+  loop_control:
+    label: "{{ item.name }}"
+  notify: ad_admin_ui | Reload nginx
+  when: ad_admin_ui_lam.stat.exists
+
+- name: ad_admin_ui | nginx accepts its configuration
+  ansible.builtin.command: nginx -t
+  changed_when: false
+  check_mode: false
+  when: ad_admin_ui_lam.stat.exists
+
+- name: ad_admin_ui | nginx and php-fpm run and start at boot
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    state: started
+    enabled: true
+  loop:
+    - "php{{ ad_admin_ui_php_version }}-fpm"
+    - nginx
+  when: ad_admin_ui_lam.stat.exists
